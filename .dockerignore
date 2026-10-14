@@ -1,0 +1,10 @@
+.agents/
+.aws-sam/
+.git/
+.github/
+.wrangler/
+dist/
+examples/
+node_modules/
+test/
+*.log

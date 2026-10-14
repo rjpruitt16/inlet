@@ -1,8 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "inlet",
+  "name": "inlet-github",
   "main": "../../dist/src/runtimes/cloudflare/runtime.js",
   "compatibility_date": "2026-10-14",
+  "vars": {
+    "INLET_AQUIFER_TIMEOUT_MS": "5000",
+    "INLET_CONFIG": "aquifer_url: https://aquifer.example.com\nroutes:\n  - id: github-main\n    path: /webhooks/github/main\n    provider: github\n    secret_ref: GITHUB_WEBHOOK_SECRET\n    destination: https://backend.example.com/webhooks/github\n"
+  },
   "durable_objects": {
     "bindings": [
       {
@@ -21,7 +25,7 @@
     "producers": [
       {
         "binding": "INLET_DLQ",
-        "queue": "inlet-dead-letter"
+        "queue": "inlet-github-dead-letter"
       }
     ]
   }

@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Provider-isolated Inlet webhook intake with Lambda container images and SQS FIFO
+
+Parameters:
+  AquiferUrl:
+    Type: String
+    Description: Aquifer base URL reachable from both Lambda functions
+  Provider:
+    Type: String
+    AllowedValues: [github, shopify, stripe, anthropic]
+  RouteId:
+    Type: String
+    Description: Stable route identifier, for example github-main
+  RoutePath:
+    Type: String
+    Description: Public webhook path, for example /webhooks/github/main
+  Destination:
+    Type: String
+    Description: Trusted backend URL Aquifer should dispatch the verified webhook to
+  WebhookSecretArn:
+    Type: String
+    Description: ARN of the provider signing secret in AWS Secrets Manager
+
+Globals:
+  Function:
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        INLET_CONFIG: !Sub |
+          aquifer_url: ${AquiferUrl}
+          routes:
+            - id: ${RouteId}
+              path: ${RoutePath}
+              provider: ${Provider}
+              secret_ref: aws-secrets:${WebhookSecretArn}
+              destination: ${Destination}
+        INLET_QUEUE_URL: !Ref InletQueue
+        INLET_DLQ_URL: !Ref InletDeadLetterQueue
+
+Resources:
+  InletApi:
+    Type: AWS::Serverless::HttpApi
+
+  InletDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dead-letter.fifo"
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+  InletQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}.fifo"
+      FifoQueue: true
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 1209600
+
+  InletHttpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: ../../
+      Dockerfile: Dockerfile
+      DockerTag: inlet-http-v1
+    Properties:
+      PackageType: Image
+      ImageConfig:
+        Command: ["dist/src/runtimes/aws/runtime.httpHandler"]
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt InletQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref WebhookSecretArn
+      Events:
+        Webhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InletApi
+            Path: /{proxy+}
+            Method: POST
+
+  InletDeliveryFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: ../../
+      Dockerfile: Dockerfile
+      DockerTag: inlet-delivery-v1
+    Properties:
+      PackageType: Image
+      ImageConfig:
+        Command: ["dist/src/runtimes/aws/runtime.queueHandler"]
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt InletQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt InletDeadLetterQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action: sqs:ChangeMessageVisibility
+            Resource: !GetAtt InletQueue.Arn
+      Events:
+        OrderedDelivery:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt InletQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            ScalingConfig:
+              MaximumConcurrency: 10
+
+Outputs:
+  WebhookBaseUrl:
+    Description: Append RoutePath to this URL when configuring the provider webhook
+    Value: !Sub "https://${InletApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"

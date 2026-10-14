@@ -4,6 +4,26 @@ Inlet verifies provider webhooks and places them into an ordered queue before [A
 
 GitHub, Shopify, Stripe, and Anthropic are supported. Inlet is Apache-2.0 licensed.
 
+## Recommended Topology
+
+Deploy one Inlet stack per provider. Every stack uses the same Inlet code, but keeps that provider's signing secret, ordered backlog, concurrency, and failures isolated. A single multi-route deployment is supported when operational simplicity matters more than isolation.
+
+```mermaid
+flowchart LR
+    GH[GitHub] --> GHI[GitHub Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    SH[Shopify] --> SHI[Shopify Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    ST[Stripe] --> STI[Stripe Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    AN[Anthropic] --> ANI[Anthropic Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+
+    GHI --> AQ[Aquifer regional fleet]
+    SHI --> AQ
+    STI --> AQ
+    ANI --> AQ
+    AQ --> BE[Your paced backends]
+```
+
+On AWS, each provider stack contains an HTTP intake Lambda, an SQS FIFO queue, and a delivery Lambda. On Cloudflare, it contains a Worker and per-fairness-key Durable Objects whose alarms deliver to Aquifer.
+
 ## Delivery
 
 Queue-first delivery is the default and the only mode in the first release:
@@ -76,11 +96,15 @@ Required environment variables:
 
 Configure the SQS event source with partial batch responses and bounded maximum concurrency. When one message must retry, Inlet leaves that message and all later messages from its group unacknowledged while unrelated groups continue.
 
+The recommended container deployment uses the root [`Dockerfile`](Dockerfile) and the provider-isolated [SAM image template](examples/aws/template.image.yaml). See [the AWS deployment guide](examples/aws/README.md) for the two-command build/deploy flow. The original [zip-based SAM template](examples/aws/template.yaml) remains available for multi-route deployments.
+
 ## Cloudflare
 
 The Worker `fetch` handler verifies intake. `InletQueueObject` is the Durable Object class that provides the ordered queue and alarm-driven Aquifer delivery. Bind it as `INLET_ORDERING`; optionally bind a Cloudflare Queue named `INLET_DLQ` for permanent failures.
 
 Provider secrets are Worker secret bindings named by each route's `secret_ref`. `INLET_CONFIG` contains the YAML configuration.
+
+See [the Cloudflare deployment guide](examples/cloudflare/README.md) and its provider-specific [`wrangler.jsonc`](examples/cloudflare/wrangler.jsonc) example.
 
 ## Aquifer Engineering
 
