@@ -129,6 +129,11 @@ export class InletQueueObject {
       return;
     }
     if (action.kind === "retry") {
+      console.warn("inlet delivery retry scheduled", {
+        reason: action.reason,
+        attempt: delivery.attempt,
+        delay_ms: action.delayMs,
+      });
       await this.state.storage.setAlarm(Date.now() + action.delayMs);
       await this.state.storage.put(messageKey(head), {
         ...delivery,

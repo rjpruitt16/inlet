@@ -15,7 +15,8 @@ export class FetchAquiferTransport implements AquiferTransport {
     options: FetchAquiferOptions = {},
   ) {
     this.timeoutMs = options.timeoutMs ?? 5_000;
-    this.fetchImplementation = options.fetch ?? fetch;
+    this.fetchImplementation =
+      options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async submit(envelope: DeliveryEnvelope): Promise<AquiferResponse> {

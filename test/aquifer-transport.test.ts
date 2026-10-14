@@ -25,6 +25,28 @@ test("Aquifer transport enables account queues and omits an unused completion we
   assert.equal("webhook_url" in body, false);
 });
 
+test("Aquifer transport preserves the global fetch receiver", async () => {
+  const originalFetch = globalThis.fetch;
+  let receiver: unknown;
+  globalThis.fetch = function (this: unknown) {
+    receiver = this;
+    return Promise.resolve(
+      new Response(JSON.stringify({ job_id: "job-1", status: "queued" }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  } as typeof fetch;
+
+  try {
+    const transport = new FetchAquiferTransport("https://aquifer.example");
+    await transport.submit(envelope());
+    assert.equal(receiver, globalThis);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function envelope(): DeliveryEnvelope {
   return {
     version: 1,
