@@ -1,6 +1,6 @@
 # Inlet
 
-Inlet verifies provider webhooks and places them into an ordered queue before Aquifer. Aquifer then applies per-user fairness, durable dispatch, dynamic pacing, and retries without exposing Aquifer directly to the internet.
+Inlet verifies provider webhooks and places them into an ordered queue before [Aquifer](https://github.com/rjpruitt16/aquifer). Aquifer then applies per-user fairness, durable dispatch, dynamic pacing, and retries without exposing Aquifer directly to the internet.
 
 GitHub, Shopify, Stripe, and Anthropic are supported. Inlet is Apache-2.0 licensed.
 
@@ -81,6 +81,10 @@ Configure the SQS event source with partial batch responses and bounded maximum 
 The Worker `fetch` handler verifies intake. `InletQueueObject` is the Durable Object class that provides the ordered queue and alarm-driven Aquifer delivery. Bind it as `INLET_ORDERING`; optionally bind a Cloudflare Queue named `INLET_DLQ` for permanent failures.
 
 Provider secrets are Worker secret bindings named by each route's `secret_ref`. `INLET_CONFIG` contains the YAML configuration.
+
+## Aquifer Engineering
+
+The repository includes an [Aquifer Engineer skill](.agents/skills/aquifer-engineer/SKILL.md) for coding agents benchmarking backends, tuning Aqueduct pacing, partitioning Aquifer, configuring Valkey high availability, driving autoscaling, and designing priority tiers.
 
 ## Development
 

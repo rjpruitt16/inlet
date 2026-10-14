@@ -32,4 +32,4 @@ routes:
     provider: anthropic
     secret_ref: ANTHROPIC_WEBHOOK_SECRET
     destination: https://backend.example.com/webhooks/anthropic
-    fairness_key: body:/organization_id
+    fairness_key: body:/data/organization_id
