@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Inlet webhook intake with SQS FIFO delivery to Aquifer
+
+Parameters:
+  InletConfig:
+    Type: String
+    Description: YAML configuration passed to both Inlet handlers
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        INLET_CONFIG: !Ref InletConfig
+        INLET_QUEUE_URL: !Ref InletQueue
+        INLET_DLQ_URL: !Ref InletDeadLetterQueue
+
+Resources:
+  InletApi:
+    Type: AWS::Serverless::HttpApi
+
+  InletDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dead-letter.fifo"
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+  InletQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}.fifo"
+      FifoQueue: true
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 1209600
+
+  InletHttpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [src/runtimes/aws/runtime.ts]
+        Format: esm
+        Minify: true
+        Target: es2022
+    Properties:
+      CodeUri: ../../
+      Handler: src/runtimes/aws/runtime.httpHandler
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt InletQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        Webhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InletApi
+            Path: /{proxy+}
+            Method: POST
+
+  InletDeliveryFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [src/runtimes/aws/runtime.ts]
+        Format: esm
+        Minify: true
+        Target: es2022
+    Properties:
+      CodeUri: ../../
+      Handler: src/runtimes/aws/runtime.queueHandler
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt InletQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt InletDeadLetterQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action: sqs:ChangeMessageVisibility
+            Resource: !GetAtt InletQueue.Arn
+      Events:
+        OrderedDelivery:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt InletQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            ScalingConfig:
+              MaximumConcurrency: 10
+
+Outputs:
+  WebhookBaseUrl:
+    Value: !Sub "https://${InletApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"

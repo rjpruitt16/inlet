@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "inlet",
+  "main": "../../dist/src/runtimes/cloudflare/runtime.js",
+  "compatibility_date": "2026-10-14",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "INLET_ORDERING",
+        "class_name": "InletQueueObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["InletQueueObject"]
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "INLET_DLQ",
+        "queue": "inlet-dead-letter"
+      }
+    ]
+  }
+}

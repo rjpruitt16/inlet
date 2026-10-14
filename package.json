@@ -1,0 +1,38 @@
+{
+  "name": "@aqueduct/inlet",
+  "version": "0.1.0",
+  "description": "Portable webhook verification and ordered delivery into Aquifer",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./dist/src/index.js",
+    "./aws": "./dist/src/runtimes/aws/index.js",
+    "./cloudflare": "./dist/src/runtimes/cloudflare/index.js"
+  },
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/src",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/**/*.test.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@aws-sdk/client-sqs": "^3.0.0",
+    "yaml": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0"
+  }
+}

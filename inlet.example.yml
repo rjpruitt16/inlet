@@ -1,0 +1,35 @@
+aquifer_url: http://aquifer.internal:8080
+
+confirmation:
+  delay_ms: 4000
+  jitter_ratio: 0.2
+  base_backoff_ms: 1000
+  max_backoff_ms: 60000
+
+routes:
+  - id: github-main
+    path: /webhooks/github/main
+    provider: github
+    secret_ref: GITHUB_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/github
+    max_retries: -1
+
+  - id: shopify-main
+    path: /webhooks/shopify/main
+    provider: shopify
+    secret_ref: SHOPIFY_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/shopify
+
+  - id: stripe-connect
+    path: /webhooks/stripe/connect
+    provider: stripe
+    secret_ref: STRIPE_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/stripe
+    fairness_key: body:/account
+
+  - id: anthropic-main
+    path: /webhooks/anthropic/main
+    provider: anthropic
+    secret_ref: ANTHROPIC_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/anthropic
+    fairness_key: body:/organization_id
