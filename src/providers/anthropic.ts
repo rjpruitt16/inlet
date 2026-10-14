@@ -35,7 +35,7 @@ export class AnthropicProvider implements ProviderAdapter {
     }
 
     const body = parseJsonBody(request);
-    const eventType = stringAt(body, "type");
+    const eventType = stringAt(body, "data", "type");
     if (!eventType) {
       throw new VerificationError("Anthropic event is missing type", "missing_event_metadata");
     }

@@ -24,10 +24,7 @@ export class ShopifyProvider implements ProviderAdapter {
     }
 
     const body = parseJsonBody(request);
-    const eventId = request.headers["x-shopify-event-id"] ?? request.headers["x-shopify-webhook-id"];
-    if (!eventId) {
-      throw new VerificationError("missing Shopify event ID", "missing_event_id");
-    }
+    const eventId = requiredHeader(request, "x-shopify-webhook-id");
 
     const result: VerifiedWebhook = {
       provider: this.name,

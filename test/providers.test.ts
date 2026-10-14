@@ -34,13 +34,14 @@ test("Shopify verifies base64 HMAC and uses the shop as fairness identity", asyn
     webhookRequest(body, {
       "x-shopify-hmac-sha256": signature,
       "x-shopify-event-id": "event-99",
+      "x-shopify-webhook-id": "delivery-99",
       "x-shopify-topic": "orders/create",
       "x-shopify-shop-domain": "store.myshopify.com",
     }),
     "shop-secret",
   );
 
-  assert.equal(result.eventId, "event-99");
+  assert.equal(result.eventId, "delivery-99");
   assert.equal(result.defaultUserId, "store.myshopify.com");
 });
 
@@ -65,7 +66,8 @@ test("Anthropic verifies Standard Webhooks signatures", async () => {
   const eventId = "msg_1";
   const secretBytes = utf8("anthropic-secret");
   const secret = `whsec_${bytesToBase64(secretBytes)}`;
-  const text = '{"type":"message.completed","organization_id":"org_1"}';
+  const text =
+    '{"type":"event","id":"msg_1","data":{"type":"session.status_idled","organization_id":"org_1"}}';
   const signature = bytesToBase64(
     await hmacSha256(secretBytes, utf8(`${eventId}.${timestamp}.${text}`)),
   );
@@ -80,6 +82,7 @@ test("Anthropic verifies Standard Webhooks signatures", async () => {
   );
 
   assert.equal(result.eventId, eventId);
+  assert.equal(result.eventType, "session.status_idled");
   assert.equal(result.defaultUserId, "org_1");
 });
 
