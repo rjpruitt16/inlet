@@ -36,7 +36,10 @@ export class FetchAquiferTransport implements AquiferTransport {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-aqueduct-account-queue": "true",
+        // "enabled", not "true": Aquifer before account-queue precedence
+        // (aquifer#71) only read "enabled" as on, and any other value
+        // switched the destination to one shared queue.
+        "x-aqueduct-account-queue": "enabled",
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(this.timeoutMs),
