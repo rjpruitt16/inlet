@@ -27,12 +27,35 @@ export default {
         new CloudflareDurableQueue(env.INLET_ORDERING),
       );
       const url = new URL(request.url);
-      const result = await intake.accept({
+      if (request.method.toUpperCase() === "GET") {
+        const response = await intake.challenge({
+          method: request.method,
+          path: url.pathname,
+          url: request.url,
+          headers: Object.fromEntries(request.headers.entries()),
+          body: new Uint8Array(),
+        });
+        return new Response(response.body, {
+          status: response.statusCode,
+          headers: response.headers,
+        });
+      }
+      const body = new Uint8Array(await request.arrayBuffer());
+      const webhookRequest = {
         method: request.method,
         path: url.pathname,
+        url: request.url,
         headers: Object.fromEntries(request.headers.entries()),
-        body: new Uint8Array(await request.arrayBuffer()),
-      });
+        body,
+      };
+      const immediate = await intake.immediateResponse(webhookRequest);
+      if (immediate) {
+        return new Response(immediate.body, {
+          status: immediate.statusCode,
+          headers: immediate.headers,
+        });
+      }
+      const result = await intake.accept(webhookRequest);
       return Response.json({ accepted: true, ...result }, { status: 202 });
     } catch (error) {
       if (error instanceof InletError) {

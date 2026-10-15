@@ -55,3 +55,83 @@ routes:
   assert.equal(request.envelope.eventId, "delivery-1");
   assert.match(request.deduplicationId, /^[a-f0-9]{64}$/);
 });
+
+test("Cloudflare intake completes the WhatsApp verification challenge", async () => {
+  const env: CloudflareEnv = {
+    INLET_CONFIG: `
+aquifer_url: http://aquifer.internal:8080
+routes:
+  - id: whatsapp-main
+    path: /webhooks/whatsapp
+    provider: whatsapp
+    secret_ref: WHATSAPP_APP_SECRET
+    verification_secret_ref: WHATSAPP_VERIFY_TOKEN
+    destination: https://backend.example/whatsapp
+`,
+    WHATSAPP_APP_SECRET: "app-secret",
+    WHATSAPP_VERIFY_TOKEN: "verify-me",
+    INLET_ORDERING: {
+      idFromName(name) {
+        return { name };
+      },
+      get() {
+        throw new Error("verification challenges must not enter the delivery queue");
+      },
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request(
+      "https://inlet.example/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=challenge-123",
+      { method: "GET" },
+    ),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "challenge-123");
+});
+
+test("Cloudflare intake answers a signed Slack URL challenge without enqueueing", async () => {
+  const env: CloudflareEnv = {
+    INLET_CONFIG: `
+aquifer_url: http://aquifer.internal:8080
+routes:
+  - id: slack-main
+    path: /webhooks/slack
+    provider: slack
+    secret_ref: SLACK_SIGNING_SECRET
+    destination: https://backend.example/slack
+`,
+    SLACK_SIGNING_SECRET: "slack-secret",
+    INLET_ORDERING: {
+      idFromName(name) {
+        return { name };
+      },
+      get() {
+        throw new Error("Slack URL challenges must not enter the delivery queue");
+      },
+    },
+  };
+  const timestamp = Math.floor(Date.now() / 1_000);
+  const body = JSON.stringify({ type: "url_verification", challenge: "slack-challenge" });
+  const signature = bytesToHex(
+    await hmacSha256(utf8("slack-secret"), utf8(`v0:${timestamp}:${body}`)),
+  );
+
+  const response = await worker.fetch(
+    new Request("https://inlet.example/webhooks/slack", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": String(timestamp),
+        "x-slack-signature": `v0=${signature}`,
+      },
+      body,
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "slack-challenge");
+});

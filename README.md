@@ -2,7 +2,23 @@
 
 Inlet verifies provider webhooks and places them into an ordered queue before [Aquifer](https://github.com/rjpruitt16/aquifer). Aquifer then applies per-user fairness, durable dispatch, dynamic pacing, and retries without exposing Aquifer directly to the internet.
 
-GitHub, Shopify, Stripe, and Anthropic are supported. Inlet is Apache-2.0 licensed.
+Inlet is Apache-2.0 licensed.
+
+## Supported Integrations
+
+| Provider | Verification | Default fairness identity, in precedence order |
+|---|---|---|
+| GitHub | HMAC-SHA256 signature | `installation.id` -> `organization.id` -> `repository.owner.id` -> `sender.id` |
+| Shopify | HMAC-SHA256 signature | shop-scoped customer ID -> `X-Shopify-Shop-Domain` |
+| Stripe | Timestamped HMAC-SHA256 signature | event `account` -> `Stripe-Account` -> `Stripe-Context` |
+| Anthropic | Standard Webhooks signature | `data.id` -> `data.session_id` -> workspace ID -> organization ID |
+| OpenAI | Standard Webhooks signature | project ID -> organization ID |
+| Slack | Signed `v0` HMAC-SHA256 request | workspace/team ID -> enterprise ID |
+| Twilio | HMAC-SHA1 signature over the public URL and request parameters | account SID -> messaging-service SID -> service SID |
+| Telegram | Webhook secret-token header | chat ID -> sender ID -> user ID |
+| WhatsApp Cloud API | Meta HMAC-SHA256 signature | message sender -> status recipient -> contact ID -> phone-number ID -> WhatsApp Business Account ID |
+
+If none of a provider's keys is present, Inlet uses `route:<route-id>`. Any route can replace these defaults with an explicit `fairness_key`.
 
 ## Recommended Topology
 
@@ -13,12 +29,16 @@ flowchart LR
     GH[GitHub] --> GHI[GitHub Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     SH[Shopify] --> SHI[Shopify Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     ST[Stripe] --> STI[Stripe Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
-    AN[Anthropic] --> ANI[Anthropic Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    AI[Anthropic and OpenAI] --> AII[AI Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    SL[Slack] --> SLI[Slack Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    CO[Communications providers<br/>Twilio, Telegram, WhatsApp] --> COI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
 
     GHI --> AQ[Aquifer regional fleet]
     SHI --> AQ
     STI --> AQ
-    ANI --> AQ
+    AII --> AQ
+    SLI --> AQ
+    COI --> AQ
     AQ --> BE[Your paced backends]
 ```
 
@@ -26,7 +46,7 @@ On AWS, each provider stack contains an HTTP intake Lambda, an SQS FIFO queue, a
 
 ## Delivery
 
-Queue-first delivery is the default and the only mode in the first release:
+Event delivery is queue-first. Provider setup challenges are verified and answered immediately without entering the queue:
 
 1. Verify the provider signature against the exact request body.
 2. Extract the provider event ID, event type, and default fairness identity.
@@ -42,14 +62,7 @@ Failures do not count as confirmation. If the first response is lost, `timeout -
 
 Ordering before Aquifer is per route and `user_id`, never global. Different users and routes can progress concurrently while events in one route for one user remain ordered through Aquifer acceptance. Aquifer then preserves that user's account-queue ordering during dispatch.
 
-| Provider | Default `user_id` source |
-|---|---|
-| GitHub | installation ID, then organization, repository owner, or sender |
-| Shopify | shop domain |
-| Stripe | event account, `Stripe-Account`, or Stripe context |
-| Anthropic | workspace or organization identity |
-
-When a provider event has no default identity, Inlet uses `route:<route-id>`. Override the default with `fairness_key`:
+Override the provider defaults above with `fairness_key`:
 
 ```yaml
 fairness_key: provider                 # provider default
@@ -75,6 +88,12 @@ routes:
 ```
 
 `secret_ref` names an environment variable on AWS or a secret binding on Cloudflare. AWS also accepts `env:NAME` and `aws-secrets:secret-id`; Cloudflare accepts `binding:NAME`.
+
+Telegram's `secret_ref` must match the `secret_token` passed to `setWebhook`. WhatsApp uses the Meta app secret in `secret_ref` and requires a separate `verification_secret_ref` for the GET subscription challenge.
+
+Twilio signs the exact public webhook URL. Inlet derives it from the incoming request; set `public_url` when a proxy changes the scheme, host, or path. Twilio support is intended for status callbacks and events that only require a `2xx` acknowledgment. Do not queue a Twilio webhook that must return TwiML synchronously.
+
+OpenAI uses its webhook endpoint signing secret in `secret_ref`. Slack uses the app signing secret, verifies and answers the Events API URL challenge before queueing, and supports JSON events plus form-encoded slash commands and interactions. Slack commands that need a later user-visible response should use Slack's `response_url`; Inlet only provides the immediate acknowledgment.
 
 `webhook_url` is not sent to Aquifer unless a route configures `completion_url`. Inlet only needs Aquifer to own the provider event. Aquifer retains the terminal result for polling.
 

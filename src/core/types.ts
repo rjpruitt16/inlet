@@ -1,12 +1,28 @@
-export type ProviderName = "github" | "shopify" | "stripe" | "anthropic";
+export type ProviderName =
+  | "github"
+  | "shopify"
+  | "stripe"
+  | "anthropic"
+  | "twilio"
+  | "telegram"
+  | "whatsapp"
+  | "openai"
+  | "slack";
 
 export type HeadersRecord = Record<string, string>;
 
 export interface WebhookRequest {
   method: string;
   path: string;
+  url?: string;
   headers: HeadersRecord;
   body: Uint8Array;
+}
+
+export interface ProviderChallengeResponse {
+  statusCode: number;
+  headers: HeadersRecord;
+  body: string;
 }
 
 export interface VerifiedWebhook {
@@ -21,6 +37,15 @@ export interface VerifiedWebhook {
 export interface ProviderAdapter {
   readonly name: ProviderName;
   verify(request: WebhookRequest, secret: string, now?: Date): Promise<VerifiedWebhook>;
+  verifyChallenge?(
+    request: WebhookRequest,
+    verificationSecret: string,
+  ): Promise<ProviderChallengeResponse>;
+  respondImmediately?(
+    request: WebhookRequest,
+    secret: string,
+    now?: Date,
+  ): Promise<ProviderChallengeResponse | undefined>;
 }
 
 export interface RouteConfig {
@@ -28,6 +53,8 @@ export interface RouteConfig {
   path: string;
   provider: ProviderName;
   secretRef: string;
+  verificationSecretRef?: string;
+  publicUrl?: string;
   destination: string;
   fairnessKey?: string;
   completionUrl?: string;

@@ -32,4 +32,35 @@ routes:
     provider: anthropic
     secret_ref: ANTHROPIC_WEBHOOK_SECRET
     destination: https://backend.example.com/webhooks/anthropic
-    fairness_key: body:/data/organization_id
+
+  - id: openai-main
+    path: /webhooks/openai/main
+    provider: openai
+    secret_ref: OPENAI_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/openai
+
+  - id: slack-main
+    path: /webhooks/slack/main
+    provider: slack
+    secret_ref: SLACK_SIGNING_SECRET
+    destination: https://backend.example.com/webhooks/slack
+
+  - id: twilio-status
+    path: /webhooks/twilio/status
+    provider: twilio
+    secret_ref: TWILIO_AUTH_TOKEN
+    public_url: https://inlet.example.com/webhooks/twilio/status
+    destination: https://backend.example.com/webhooks/twilio/status
+
+  - id: telegram-main
+    path: /webhooks/telegram/main
+    provider: telegram
+    secret_ref: TELEGRAM_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/telegram
+
+  - id: whatsapp-main
+    path: /webhooks/whatsapp/main
+    provider: whatsapp
+    secret_ref: WHATSAPP_APP_SECRET
+    verification_secret_ref: WHATSAPP_VERIFY_TOKEN
+    destination: https://backend.example.com/webhooks/whatsapp

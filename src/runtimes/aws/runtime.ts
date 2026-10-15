@@ -14,6 +14,7 @@ import { FetchAquiferTransport } from "../../core/aquifer.js";
 import { parseConfig } from "../../core/config.js";
 import { deliverEnvelope } from "../../core/delivery.js";
 import { InletError } from "../../core/errors.js";
+import { normalizeHeaders } from "../../core/headers.js";
 import { InletIntake } from "../../core/ingress.js";
 import type { DeliveryAction, DeliveryEnvelope, HeadersRecord, InletConfig } from "../../core/types.js";
 import { defaultProviders } from "../../providers/index.js";
@@ -34,12 +35,37 @@ let runtimePromise: Promise<AwsRuntime> | undefined;
 export async function httpHandler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
     const runtime = await getRuntime();
-    const result = await runtime.intake.accept({
+    const request: {
+      method: string;
+      path: string;
+      url?: string;
+      headers: HeadersRecord;
+      body: Uint8Array;
+    } = {
       method: event.requestContext.http.method,
       path: event.rawPath,
       headers: compactHeaders(event.headers),
       body: decodeBody(event.body ?? "", event.isBase64Encoded),
-    });
+    };
+    const requestUrl = apiGatewayRequestUrl(event);
+    if (requestUrl !== undefined) request.url = requestUrl;
+    if (request.method.toUpperCase() === "GET") {
+      const response = await runtime.intake.challenge(request);
+      return {
+        statusCode: response.statusCode,
+        headers: response.headers,
+        body: response.body,
+      };
+    }
+    const immediate = await runtime.intake.immediateResponse(request);
+    if (immediate) {
+      return {
+        statusCode: immediate.statusCode,
+        headers: immediate.headers,
+        body: immediate.body,
+      };
+    }
+    const result = await runtime.intake.accept(request);
     return jsonResponse(202, { accepted: true, ...result });
   } catch (error) {
     if (error instanceof InletError) {
@@ -228,6 +254,15 @@ function compactHeaders(headers: Record<string, string | undefined>): HeadersRec
 
 function decodeBody(body: string, encoded: boolean): Uint8Array {
   return encoded ? Uint8Array.from(Buffer.from(body, "base64")) : new TextEncoder().encode(body);
+}
+
+function apiGatewayRequestUrl(event: APIGatewayProxyEventV2): string | undefined {
+  const headers = normalizeHeaders(compactHeaders(event.headers));
+  const host = headers["x-forwarded-host"] ?? headers.host;
+  if (!host) return undefined;
+  const protocol = headers["x-forwarded-proto"] ?? "https";
+  const query = event.rawQueryString ? `?${event.rawQueryString}` : "";
+  return `${protocol}://${host}${event.rawPath}${query}`;
 }
 
 function jsonResponse(statusCode: number, body: unknown): APIGatewayProxyResultV2 {

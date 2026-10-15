@@ -40,6 +40,8 @@ export class AnthropicProvider implements ProviderAdapter {
       throw new VerificationError("Anthropic event is missing type", "missing_event_metadata");
     }
     const defaultUserId =
+      stringAt(body, "data", "id") ??
+      stringAt(body, "data", "session_id") ??
       stringAt(body, "workspace_id") ??
       stringAt(body, "organization_id") ??
       stringAt(body, "data", "workspace_id") ??

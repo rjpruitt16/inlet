@@ -55,6 +55,51 @@ test("intake maps provider identity into an ordered queue group", async () => {
   assert.match(queue.messages[0]?.deduplicationId ?? "", /^[a-f0-9]{64}$/);
 });
 
+test("intake replaces an internal URL with the configured public signing URL", async () => {
+  const queue = new RecordingQueue();
+  let observedUrl: string | undefined;
+  const provider: ProviderAdapter = {
+    name: "twilio",
+    async verify(request) {
+      observedUrl = request.url;
+      return {
+        provider: "twilio",
+        eventId: "SM123",
+        eventType: "delivered",
+        body: {},
+        forwardedHeaders: {},
+      };
+    },
+  };
+  const config: InletConfig = {
+    aquiferUrl: "http://aquifer:8080",
+    confirmation: { delayMs: 4_000, jitterRatio: 0.2, baseBackoffMs: 1_000, maxBackoffMs: 60_000 },
+    routes: [{
+      id: "twilio-main",
+      path: "/hooks/twilio",
+      provider: "twilio",
+      secretRef: "TWILIO_AUTH_TOKEN",
+      publicUrl: "https://hooks.example.com/hooks/twilio",
+      destination: "https://backend.example/twilio",
+    }],
+  };
+  const secrets: SecretResolver = { async resolve() { return "secret"; } };
+  const intake = new InletIntake(config, new Map([["twilio", provider]]), secrets, queue);
+
+  await intake.accept({
+    method: "POST",
+    path: "/hooks/twilio",
+    url: "https://internal.example/hooks/twilio?bodySHA256=abc%2B123",
+    headers: {},
+    body: utf8("{}"),
+  });
+
+  assert.equal(
+    observedUrl,
+    "https://hooks.example.com/hooks/twilio?bodySHA256=abc%2B123",
+  );
+});
+
 class RecordingQueue implements OrderedQueue {
   readonly messages: Array<{
     envelope: DeliveryEnvelope;

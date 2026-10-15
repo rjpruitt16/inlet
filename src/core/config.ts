@@ -2,7 +2,17 @@ import { parse } from "yaml";
 import { ConfigurationError } from "./errors.js";
 import type { ConfirmationConfig, InletConfig, ProviderName, RouteConfig } from "./types.js";
 
-const providers = new Set<ProviderName>(["github", "shopify", "stripe", "anthropic"]);
+const providers = new Set<ProviderName>([
+  "github",
+  "shopify",
+  "stripe",
+  "anthropic",
+  "twilio",
+  "telegram",
+  "whatsapp",
+  "openai",
+  "slack",
+]);
 
 const confirmationDefaults: ConfirmationConfig = {
   delayMs: 4_000,
@@ -70,11 +80,26 @@ function parseRoute(raw: Record<string, unknown>, index: number): RouteConfig {
 
   assignOptionalString(route, "fairnessKey", raw.fairness_key, `routes[${index}].fairness_key`);
   assignOptionalString(route, "completionUrl", raw.completion_url, `routes[${index}].completion_url`);
+  assignOptionalString(
+    route,
+    "verificationSecretRef",
+    raw.verification_secret_ref,
+    `routes[${index}].verification_secret_ref`,
+  );
+  assignOptionalString(route, "publicUrl", raw.public_url, `routes[${index}].public_url`);
   assignOptionalInteger(route, "maxRetries", raw.max_retries, `routes[${index}].max_retries`, -1, 100);
   assignOptionalInteger(route, "executeWithinSeconds", raw.execute_within_seconds, `routes[${index}].execute_within_seconds`, 1);
 
   if (route.completionUrl !== undefined) {
     requireHttpUrl(route.completionUrl, `routes[${index}].completion_url`);
+  }
+  if (route.publicUrl !== undefined) {
+    requireHttpUrl(route.publicUrl, `routes[${index}].public_url`);
+  }
+  if (route.provider === "whatsapp" && route.verificationSecretRef === undefined) {
+    throw new ConfigurationError(
+      `routes[${index}].verification_secret_ref is required for WhatsApp`,
+    );
   }
   return route;
 }
@@ -95,7 +120,9 @@ function parseConfirmation(value: unknown): ConfirmationConfig {
   };
 }
 
-function assignOptionalString<K extends "fairnessKey" | "completionUrl">(
+function assignOptionalString<
+  K extends "fairnessKey" | "completionUrl" | "verificationSecretRef" | "publicUrl"
+>(
   route: RouteConfig,
   key: K,
   value: unknown,
