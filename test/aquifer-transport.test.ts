@@ -17,7 +17,7 @@ test("Aquifer transport enables account queues and omits an unused completion we
   await transport.submit(envelope());
 
   assert.equal(capturedUrl, "http://aquifer.internal:8080/jobs");
-  assert.equal((capturedInit?.headers as Record<string, string>)["x-aqueduct-account-queue"], "true");
+  assert.equal((capturedInit?.headers as Record<string, string>)["x-aqueduct-account-queue"], "enabled");
   const body = JSON.parse(String(capturedInit?.body)) as Record<string, unknown>;
   assert.equal(body.user_id, "installation-42");
   assert.equal(body.idempotent_key, "inlet:github:github-main:event-1");

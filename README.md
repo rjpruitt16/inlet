@@ -31,7 +31,7 @@ Queue-first delivery is the default and the only mode in the first release:
 1. Verify the provider signature against the exact request body.
 2. Extract the provider event ID, event type, and default fairness identity.
 3. Durably enqueue the event before acknowledging the provider.
-4. Submit it to `POST /jobs` with the fairness identity as `user_id`, the provider event ID in the idempotency key, and `X-Aqueduct-Account-Queue: true`.
+4. Submit it to `POST /jobs` with the fairness identity as `user_id`, the provider event ID in the idempotency key, and `X-Aqueduct-Account-Queue: enabled`.
 5. Keep the queue message after Aquifer returns `201`.
 6. Resubmit after about four seconds with jitter. Delete the queue message only after two successful Aquifer acknowledgments for the same job, ending with `200` and `duplicate: true`.
 7. Retry timeouts, `408`, `429`, and `5xx` with exponential backoff and full jitter. Honor `Retry-After`. Move permanent failures to the dead-letter queue.
