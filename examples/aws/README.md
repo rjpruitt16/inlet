@@ -16,6 +16,8 @@ The split keeps provider acknowledgement fast while the delivery Lambda waits fo
 - A provider signing secret in AWS Secrets Manager
 - Network access from both Lambdas to `AquiferUrl`
 
+Need a small Aquifer instance for evaluation first? The [Aquifer AWS quick start](https://github.com/rjpruitt16/aquifer/tree/main/examples/aws) installs the latest verified release on a CIDR-restricted one-vCPU EC2 test node. Its public endpoint is plain HTTP for narrow testing; it is not a production Aquifer topology.
+
 ## Deploy A Provider
 
 From the repository root:
