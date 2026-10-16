@@ -80,7 +80,14 @@ export class InletQueueObject {
   ) {
     this.config = parseConfig(env.INLET_CONFIG);
     const timeoutMs = Number(env.INLET_AQUIFER_TIMEOUT_MS ?? "5000");
-    this.aquifer = new FetchAquiferTransport(this.config.aquiferUrl, { timeoutMs });
+    const aquiferBinding = env.INLET_AQUIFER;
+    const privateTransport = aquiferBinding
+      ? { fetch: ((input, init) => aquiferBinding.fetch(input, init)) as typeof fetch }
+      : {};
+    this.aquifer = new FetchAquiferTransport(this.config.aquiferUrl, {
+      timeoutMs,
+      ...privateTransport,
+    });
   }
 
   async fetch(request: Request): Promise<Response> {

@@ -40,4 +40,6 @@ Repeat with a separate config, Worker name, dead-letter queue, and signing secre
 
 ## Aquifer Connectivity
 
-The Worker must be able to reach `aquifer_url`. If Aquifer is private, expose it through a narrowly scoped authenticated gateway or Cloudflare connectivity appropriate to the deployment. Inlet chooses destinations from trusted configuration, but Aquifer should still never be exposed as a public caller-controlled relay.
+The Worker must be able to reach `aquifer_url`. Bind a Cloudflare VPC Service as `INLET_AQUIFER` to route Durable Object delivery through a Cloudflare Tunnel to private Aquifer. Without that binding, Inlet uses the ordinary public `fetch` path for backward compatibility.
+
+The [Cloudflare and Fly.io quick start](../cloudflare-fly/README.md) deploys this private path end to end. Inlet chooses destinations from trusted configuration, but Aquifer should still never be exposed as a public caller-controlled relay.

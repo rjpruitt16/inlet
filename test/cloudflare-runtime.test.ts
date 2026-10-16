@@ -45,6 +45,41 @@ test("Durable Object keeps FIFO head until Aquifer confirms it", async () => {
   }
 });
 
+test("Durable Object sends Aquifer requests through the VPC service binding", async () => {
+  const storage = new MemoryStorage();
+  const requests: Array<{ input: string; body: Record<string, unknown> }> = [];
+  const privateAquifer = {
+    async fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+      requests.push({
+        input: String(input),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({ job_id: "job-private", status: "queued" }), {
+        status: 201,
+      });
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("public fetch must not be used when INLET_AQUIFER is bound");
+  };
+
+  try {
+    const object = new InletQueueObject(
+      { storage },
+      { ...env(), INLET_AQUIFER: privateAquifer },
+    );
+    await enqueue(object, envelope("event-private"), "dedup-private");
+    await object.alarm();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.input, "http://aquifer.internal:8080/jobs");
+    assert.equal(requests[0]?.body.idempotent_key, "inlet:github:github-main:event-private");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 async function enqueue(
   object: InletQueueObject,
   value: DeliveryEnvelope,

@@ -123,7 +123,7 @@ The Worker `fetch` handler verifies intake. `InletQueueObject` is the Durable Ob
 
 Provider secrets are Worker secret bindings named by each route's `secret_ref`. `INLET_CONFIG` contains the YAML configuration.
 
-See [the Cloudflare deployment guide](examples/cloudflare/README.md) and its provider-specific [`wrangler.jsonc`](examples/cloudflare/wrangler.jsonc) example.
+See [the Cloudflare deployment guide](examples/cloudflare/README.md) and its provider-specific [`wrangler.jsonc`](examples/cloudflare/wrangler.jsonc) example. The [Cloudflare Worker and private Fly.io Aquifer quick start](examples/cloudflare-fly/README.md) adds the `INLET_AQUIFER` VPC binding and deploys the private cross-cloud path.
 
 ## Aquifer Engineering
 
