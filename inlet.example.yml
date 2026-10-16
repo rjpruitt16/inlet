@@ -64,3 +64,21 @@ routes:
     secret_ref: WHATSAPP_APP_SECRET
     verification_secret_ref: WHATSAPP_VERIFY_TOKEN
     destination: https://backend.example.com/webhooks/whatsapp
+
+  - id: alchemy-main
+    path: /webhooks/alchemy/main
+    provider: alchemy
+    secret_ref: ALCHEMY_SIGNING_KEY
+    destination: https://backend.example.com/webhooks/alchemy
+
+  - id: quicknode-main
+    path: /webhooks/quicknode/main
+    provider: quicknode
+    secret_ref: QUICKNODE_SECURITY_TOKEN
+    destination: https://backend.example.com/webhooks/quicknode
+
+  - id: helius-main
+    path: /webhooks/helius/main
+    provider: helius
+    secret_ref: HELIUS_AUTH_HEADER
+    destination: https://backend.example.com/webhooks/helius

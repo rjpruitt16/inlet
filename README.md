@@ -17,6 +17,9 @@ Inlet is Apache-2.0 licensed.
 | Twilio | HMAC-SHA1 signature over the public URL and request parameters | account SID -> messaging-service SID -> service SID |
 | Telegram | Webhook secret-token header | chat ID -> sender ID -> user ID |
 | WhatsApp Cloud API | Meta HMAC-SHA256 signature | message sender -> status recipient -> contact ID -> phone-number ID -> WhatsApp Business Account ID |
+| Alchemy | HMAC-SHA256 signature over the raw body | webhook ID -> app ID -> network |
+| QuickNode | HMAC-SHA256 over nonce, timestamp, and decoded payload | stream ID -> webhook ID |
+| Helius | Constant-time comparison of the configured `Authorization` value | first transaction fee payer -> first transfer/account identity |
 
 If none of a provider's keys is present, Inlet uses `route:<route-id>`. Any route can replace these defaults with an explicit `fairness_key`.
 
@@ -32,6 +35,7 @@ flowchart LR
     AI[Anthropic and OpenAI] --> AII[AI Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     SL[Slack] --> SLI[Slack Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     CO[Communications providers<br/>Twilio, Telegram, WhatsApp] --> COI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    BC[Blockchain providers<br/>Alchemy, QuickNode, Helius] --> BCI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
 
     GHI --> AQ[Aquifer regional fleet]
     SHI --> AQ
@@ -39,6 +43,7 @@ flowchart LR
     AII --> AQ
     SLI --> AQ
     COI --> AQ
+    BCI --> AQ
     AQ --> BE[Your paced backends]
 ```
 
@@ -94,6 +99,8 @@ Telegram's `secret_ref` must match the `secret_token` passed to `setWebhook`. Wh
 Twilio signs the exact public webhook URL. Inlet derives it from the incoming request; set `public_url` when a proxy changes the scheme, host, or path. Twilio support is intended for status callbacks and events that only require a `2xx` acknowledgment. Do not queue a Twilio webhook that must return TwiML synchronously.
 
 OpenAI uses its webhook endpoint signing secret in `secret_ref`. Slack uses the app signing secret, verifies and answers the Events API URL challenge before queueing, and supports JSON events plus form-encoded slash commands and interactions. Slack commands that need a later user-visible response should use Slack's `response_url`; Inlet only provides the immediate acknowledgment.
+
+Alchemy uses the webhook signing key in `secret_ref`. QuickNode uses the Stream or Webhook security token and supports both plain JSON and gzip deliveries. Helius uses its official `authHeader` mechanism: configure the same random value in Helius and `secret_ref`; Helius sends that exact value in `Authorization`. Helius does not sign the request body, so use a unique, high-entropy value and HTTPS.
 
 `webhook_url` is not sent to Aquifer unless a route configures `completion_url`. Inlet only needs Aquifer to own the provider event. Aquifer retains the terminal result for polling.
 
