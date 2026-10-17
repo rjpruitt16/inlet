@@ -22,7 +22,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/test/**/*.test.js"
+    "test": "npm run build && node --test dist/test/**/*.test.js",
+    "build:canalis-plugins": "node plugins/canalis/build.mjs",
+    "check:canalis-plugins": "tsc -p plugins/canalis/tsconfig.json"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
