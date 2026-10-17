@@ -20,6 +20,10 @@ Inlet is Apache-2.0 licensed.
 
 If none of a provider's keys is present, Inlet uses `route:<route-id>`. Any route can replace these defaults with an explicit `fairness_key`.
 
+## Canalis plugins
+
+Running [Canalis](https://github.com/rjpruitt16/canalis-rs) already? Inlet's providers also build into Canalis webhook plugins (`plugins/canalis`, `npm run build:canalis-plugins`), so Canalis can verify webhooks itself with no Lambda. They're built from the same provider code, so both verify webhooks identically. Shopify is available today.
+
 ## Recommended Topology
 
 Deploy one Inlet stack per provider. Every stack uses the same Inlet code, but keeps that provider's signing secret, ordered backlog, concurrency, and failures isolated. A single multi-route deployment is supported when operational simplicity matters more than isolation.
