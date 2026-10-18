@@ -9,18 +9,26 @@ The only part that differs is `encoding.ts`. It stands in for `src/core/encoding
 You need [`extism-js`](https://github.com/extism/js-pdk/releases) and [Binaryen](https://github.com/WebAssembly/binaryen/releases) (`wasm-opt`, `wasm-merge`) on `PATH`.
 
 ```bash
-npm run build:canalis-plugins     # dist/canalis/shopify.wasm
-```
+npm run build:canalis-plugins     # dist/canalis/{shopify,github,st## Use with Canalis
 
-## Use with Canalis
+Copy the plugins you want into Canalis's plugins folder. Then, for each one, set its secret and where its events go:
 
 ```bash
-cp dist/canalis/shopify.wasm /path/to/canalis/plugins/
-SHOPIFY_WEBHOOK_SECRET=...                      # the app's API secret (what Shopify signs with)
-CANALIS_HOOK_SHOPIFY_TARGET=https://app.example/webhooks/shopify
+cp dist/canalis/stripe.wasm /path/to/canalis/plugins/
+STRIPE_WEBHOOK_SECRET=whsec_...
+CANALIS_HOOK_STRIPE_TARGET=https://app.example/webhooks/stripe
 ```
 
-Point Shopify's webhook URL at `https://<canalis>/hooks/shopify`. Canalis verifies each delivery and deduplicates it by `X-Shopify-Webhook-Id`. It answers Shopify once the event is safely queued, then delivers it to the target through Aquifer, fairly per shop (or per shop and customer).
+| Plugin | Secret | Deduplicated by | Fair per |
+|---|---|---|---|
+| `shopify` | `SHOPIFY_WEBHOOK_SECRET`: the app's API secret | `X-Shopify-Webhook-Id` | shop (or shop and customer) |
+| `github` | `GITHUB_WEBHOOK_SECRET`: the webhook's secret | `X-GitHub-Delivery` | installation, else organization, repository owner or sender |
+| `stripe` | `STRIPE_WEBHOOK_SECRET`: the endpoint's `whsec_...` signing secret | the event's `id` | connected account |
+| `anthropic` | `ANTHROPIC_WEBHOOK_SECRET`: the `whsec_...` signing secret | `webhook-id` | the event's object (`data.id`), else its workspace or organization |
+
+Point the provider's webhook URL at `https://<canalis>/hooks/<plugin>`. Canalis verifies each delivery and refuses a bad signature with 401. Stripe and Anthropic deliveries are also refused when their signed timestamp is more than 5 minutes off. Canalis deduplicates each event and answers the provider once it's safely queued. It then delivers it to the target through Aquifer, fairly per tenant (the last column).
+
+ per shop and customer).
 
 ## The plugin interface
 
