@@ -7,3 +7,7 @@ export * from "./core/fairness.js";
 export * from "./core/ingress.js";
 export * from "./core/types.js";
 export * from "./providers/index.js";
+export * from "./core/kafka/dispatch.js";
+export * from "./core/kafka/queue.js";
+export * from "./core/kafka/reconcile.js";
+export * from "./core/kafka/records.js";

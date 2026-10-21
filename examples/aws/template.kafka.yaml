@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Provider-isolated Inlet webhook intake that delivers through your own Kafka
+
+Parameters:
+  AquiferUrl:
+    Type: String
+    Description: Aquifer base URL reachable from the Lambda functions
+  Provider:
+    Type: String
+    AllowedValues: [github, shopify, stripe, anthropic, openai, slack, twilio, telegram, whatsapp]
+  RouteId:
+    Type: String
+    Description: Stable route identifier, for example github-main
+  RoutePath:
+    Type: String
+    Description: Public webhook path, for example /webhooks/github/main
+  Destination:
+    Type: String
+    Description: Trusted backend URL Aquifer should dispatch the verified webhook to
+  WebhookSecretArn:
+    Type: String
+    Description: ARN of the provider signing secret in AWS Secrets Manager
+  # The functions run outside a VPC, so the brokers must be reachable from the
+  # internet over TLS (Confluent Cloud, Redpanda Cloud, MSK with public access).
+  # For brokers inside a VPC, add VpcConfig to all three functions and
+  # VPC_SUBNET / VPC_SECURITY_GROUP entries to the trigger's
+  # SourceAccessConfigurations; the subnets need a NAT route to reach Aquifer
+  # and Secrets Manager.
+  KafkaBrokers:
+    Type: String
+    Description: Comma-separated bootstrap servers reachable from the internet over TLS, for example broker-1.example.com:9093
+  KafkaSecretArn:
+    Type: String
+    Description: Secrets Manager secret with {"username":"...","password":"..."} for Kafka
+  EventsTopic:
+    Type: String
+    Default: inlet.events
+  ResultsTopic:
+    Type: String
+    Default: inlet.results
+  ReconcileAfterSeconds:
+    Type: Number
+    Default: 1800
+    MinValue: 1
+    Description: An event with no result this long after it was written is redriven
+  SearchWindowSeconds:
+    Type: Number
+    Default: 3600
+    MinValue: 1
+    Description: How far past an event's write time to look for its result (at least ReconcileAfterSeconds)
+  MaxRedrives:
+    Type: Number
+    Default: 3
+    MinValue: 0
+    MaxValue: 100
+
+Globals:
+  Function:
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        INLET_CONFIG: !Sub |
+          aquifer_url: ${AquiferUrl}
+          delivery: kafka
+          kafka:
+            events_topic: ${EventsTopic}
+            results_topic: ${ResultsTopic}
+            reconcile:
+              after_seconds: ${ReconcileAfterSeconds}
+              search_window_seconds: ${SearchWindowSeconds}
+              max_redrives: ${MaxRedrives}
+          routes:
+            - id: ${RouteId}
+              path: ${RoutePath}
+              provider: ${Provider}
+              secret_ref: aws-secrets:${WebhookSecretArn}
+              destination: ${Destination}
+        INLET_KAFKA_BROKERS: !Ref KafkaBrokers
+        # SASL/SCRAM-SHA-512 over TLS (MSK, Redpanda, most self-hosted Kafka).
+        # For SASL/PLAIN (Confluent Cloud), set this to plain and the trigger's
+        # SourceAccessConfigurations Type below to BASIC_AUTH.
+        INLET_KAFKA_SASL_MECHANISM: scram-sha-512
+        INLET_KAFKA_SECRET_REF: !Sub "aws-secrets:${KafkaSecretArn}"
+        INLET_COMPLETION_SECRET_REF: !Sub "aws-secrets:${CompletionSecret}"
+
+Resources:
+  InletApi:
+    Type: AWS::Serverless::HttpApi
+
+  # Signs the completion URLs Aquifer calls back, so only Aquifer's
+  # webhooks for real deliveries can write results.
+  CompletionSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub "Inlet completion URL signing key for ${AWS::StackName}"
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  InletHttpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: ../../
+      Dockerfile: Dockerfile
+      DockerTag: inlet-http-kafka-v1
+    Properties:
+      PackageType: Image
+      ImageConfig:
+        Command: ["dist/src/runtimes/aws/runtime.httpHandler"]
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: [!Ref WebhookSecretArn, !Ref KafkaSecretArn, !Ref CompletionSecret]
+      Events:
+        # Provider webhooks and Aquifer's completion webhooks (/_inlet/completions).
+        Webhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InletApi
+            Path: /{proxy+}
+            Method: POST
+
+  InletDeliveryFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: ../../
+      Dockerfile: Dockerfile
+      DockerTag: inlet-delivery-kafka-v1
+    Properties:
+      PackageType: Image
+      ImageConfig:
+        Command: ["dist/src/runtimes/aws/runtime.kafkaHandler"]
+      # Long enough to wait out Aquifer backoff and one batch confirmation.
+      Timeout: 300
+      Environment:
+        Variables:
+          INLET_PUBLIC_URL: !Sub "https://${InletApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: [!Ref KafkaSecretArn, !Ref CompletionSecret]
+      Events:
+        Events:
+          Type: SelfManagedKafka
+          Properties:
+            KafkaBootstrapServers: !Split [",", !Ref KafkaBrokers]
+            Topics: [!Ref EventsTopic]
+            ConsumerGroupId: !Sub "${AWS::StackName}-delivery"
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 100
+            SourceAccessConfigurations:
+              - Type: SASL_SCRAM_512_AUTH
+                URI: !Ref KafkaSecretArn
+
+  InletReconcileFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: ../../
+      Dockerfile: Dockerfile
+      DockerTag: inlet-reconcile-kafka-v1
+    Properties:
+      PackageType: Image
+      ImageConfig:
+        Command: ["dist/src/runtimes/aws/runtime.reconcileHandler"]
+      Timeout: 240
+      Environment:
+        Variables:
+          INLET_KAFKA_RECONCILER_GROUP: !Sub "${AWS::StackName}-reconciler"
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: [!Ref KafkaSecretArn]
+      Events:
+        Every5Minutes:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(5 minutes)
+
+Outputs:
+  WebhookBaseUrl:
+    Description: Append RoutePath to this URL when configuring the provider webhook
+    Value: !Sub "https://${InletApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
