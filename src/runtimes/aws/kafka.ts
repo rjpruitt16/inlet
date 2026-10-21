@@ -80,7 +80,12 @@ export class KafkajsWriter implements KafkaWriter {
       await producer.connect();
       this.producer = producer;
       return producer;
-    })();
+    })().catch((error: unknown) => {
+      // Let the next write try again instead of failing forever on one
+      // broker hiccup at cold start.
+      this.connecting = undefined;
+      throw error;
+    });
     return this.connecting;
   }
 }
@@ -172,12 +177,17 @@ export class KafkajsReconcileLog implements ReconcileLog {
     }
 
     const results: ResultRecord[] = [];
-    await this.readRange(resultsTopic, starts, ends, (message) => {
+    const complete = await this.readRange(resultsTopic, starts, ends, (message) => {
       if (message.timestamp > to.getTime()) return "stop";
       const result = parseResultRecord(message.value);
       if (result) results.push(result);
       return "continue";
     });
+    if (!complete) {
+      // A result that wasn't read would look missing and cause a wrong
+      // redrive, so abort this pass; the cursor doesn't move.
+      throw new Error(`timed out reading ${resultsTopic}; reconcile pass aborted`);
+    }
     return results;
   }
 
@@ -188,18 +198,20 @@ export class KafkajsReconcileLog implements ReconcileLog {
   /**
    * Reads each partition from its start offset up to (not including) its
    * end offset, or until visit() returns "stop" for that partition.
+   * Resolves false if the read timed out before every partition finished;
+   * partitions that did finish were read completely and in order.
    */
   private async readRange(
     topic: string,
     starts: Map<number, bigint>,
     ends: Map<number, bigint>,
     visit: (message: RawMessage) => "continue" | "stop",
-  ): Promise<void> {
+  ): Promise<boolean> {
     const open = new Set<number>();
     for (const [partition, start] of starts) {
       if (start < (ends.get(partition) ?? 0n)) open.add(partition);
     }
-    if (open.size === 0) return;
+    if (open.size === 0) return true;
 
     const consumer = this.kafka.consumer({
       groupId: `inlet-reader-${randomUUID()}`,
@@ -249,8 +261,13 @@ export class KafkajsReconcileLog implements ReconcileLog {
         if (open.has(partition)) consumer.seek({ topic, partition, offset: start.toString() });
       }
 
-      const timeout = new Promise<void>((resolve) => setTimeout(resolve, this.readTimeoutMs));
-      await Promise.race([finished, timeout]);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), this.readTimeoutMs);
+      });
+      const complete = await Promise.race([finished.then(() => true), timeout]);
+      clearTimeout(timer);
+      return complete;
     } finally {
       await consumer.disconnect();
     }

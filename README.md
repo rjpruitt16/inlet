@@ -194,7 +194,7 @@ Delivery is at least once. Every request carries `x-inlet-event-id` and `x-inlet
 | `INLET_PUBLIC_URL` | Inlet's public base URL, for completion URLs (dispatcher only) |
 | `INLET_KAFKA_RECONCILER_GROUP` | Consumer group that holds the reconciler's cursor (default `inlet-reconciler`) |
 
-[`examples/aws/template.kafka.yaml`](examples/aws/template.kafka.yaml) deploys the intake, dispatcher (`kafkaHandler`) and reconciler (`reconcileHandler`) against your Kafka. Create the topics first. The template uses SASL/SCRAM-SHA-512 over TLS; for SASL/PLAIN (Confluent Cloud) change the two lines its comments point to.
+[`examples/aws/template.kafka.yaml`](examples/aws/template.kafka.yaml) deploys the intake, dispatcher (`kafkaHandler`) and reconciler (`reconcileHandler`) against your Kafka. Create the topics first. The template's functions run outside a VPC, so the brokers must be reachable from the internet over TLS; its comments show what to add for brokers inside a VPC. It uses SASL/SCRAM-SHA-512; for SASL/PLAIN (Confluent Cloud) change the two lines its comments point to.
 
 Limits:
 

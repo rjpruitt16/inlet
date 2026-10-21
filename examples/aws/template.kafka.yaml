@@ -21,9 +21,15 @@ Parameters:
   WebhookSecretArn:
     Type: String
     Description: ARN of the provider signing secret in AWS Secrets Manager
+  # The functions run outside a VPC, so the brokers must be reachable from the
+  # internet over TLS (Confluent Cloud, Redpanda Cloud, MSK with public access).
+  # For brokers inside a VPC, add VpcConfig to all three functions and
+  # VPC_SUBNET / VPC_SECURITY_GROUP entries to the trigger's
+  # SourceAccessConfigurations; the subnets need a NAT route to reach Aquifer
+  # and Secrets Manager.
   KafkaBrokers:
     Type: String
-    Description: Comma-separated bootstrap servers, for example broker-1.example.com:9093
+    Description: Comma-separated bootstrap servers reachable from the internet over TLS, for example broker-1.example.com:9093
   KafkaSecretArn:
     Type: String
     Description: Secrets Manager secret with {"username":"...","password":"..."} for Kafka

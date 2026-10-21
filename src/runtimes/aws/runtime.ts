@@ -228,7 +228,12 @@ function parseDeadLetterBody(body: string): unknown {
 }
 
 async function getRuntime(): Promise<AwsRuntime> {
-  runtimePromise ??= createRuntime();
+  runtimePromise ??= createRuntime().catch((error: unknown) => {
+    // A failed start (a secret or Kafka not reachable yet) shouldn't stick
+    // to this container; the next invocation tries again.
+    runtimePromise = undefined;
+    throw error;
+  });
   return runtimePromise;
 }
 
