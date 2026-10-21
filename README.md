@@ -91,6 +91,7 @@ deploy:
     sasl_mechanism: scram-sha-512
     credentials_secret: inlet-github-kafka
     partitions: 6
+    websocket_export: false  # true: accept Aquifer's WebSocket transcript export
 ```
 
 The SAM templates in [`examples/aws`](examples/aws) and the Wrangler config in [`examples/cloudflare`](examples/cloudflare) remain for teams that manage their own infrastructure as code.
@@ -188,6 +189,7 @@ delivery: kafka
 kafka:
   events_topic: inlet.events       # default
   results_topic: inlet.results     # default
+  websocket_topic: inlet.websocket # default: where exported WebSocket transcripts go
   reconcile:
     after_seconds: 1800            # default: an event with no result after 30 minutes is overdue
     search_window_seconds: 3600    # default: how far past an event to look for its result
@@ -240,6 +242,16 @@ Delivery is at least once. Every request carries `x-inlet-event-id` and `x-inlet
 | `INLET_COMPLETION_SECRET_REF` | Key that signs completion URLs |
 | `INLET_PUBLIC_URL` | Inlet's public base URL, for completion URLs (dispatcher only) |
 | `INLET_KAFKA_RECONCILER_GROUP` | Consumer group that holds the reconciler's cursor (default `inlet-reconciler`) |
+| `INLET_WS_EXPORT_TOKEN_REF` | Bearer token Aquifer's WebSocket export must send; turns on `/_inlet/websocket-events` |
+| `INLET_KAFKA_MAX_RECORD_BYTES` | Largest WebSocket record to write (default 1,000,000, Kafka's default message size); a batch with a larger one gets 413 |
+
+### WebSocket transcripts
+
+Aquifer keeps each WebSocket session's transcript in Valkey for a replay window (24 hours by default). To keep every message for longer, for audit or for replaying a session days later, turn on Aquifer's transcript export (`AQUIFER_WS_EXPORT_*`) and point it at Inlet's `/_inlet/websocket-events`.
+
+Inlet writes each message to `kafka.websocket_topic` as an `inlet.websocket.v1` record, keyed by `session_id` so a session's messages stay in order. The fields are `session_id`, `stream_id` (the transcript cursor), `direction`, `type`, `message_id`, `caused_by`, `generation`, `payload`, `recorded_at` and `node_id`. Delivery is at least once, so drop repeats by `session_id` + `stream_id`.
+
+With the CLI, set `websocket_export: true` under `deploy.kafka`. `inlet deploy` then creates the topic and a generated token, and prints the exact Aquifer settings to use.
 
 [`examples/aws/template.kafka.yaml`](examples/aws/template.kafka.yaml) deploys the intake, dispatcher (`kafkaHandler`) and reconciler (`reconcileHandler`) against your Kafka. Create the topics first. The template's functions run outside a VPC, so the brokers must be reachable from the internet over TLS; its comments show what to add for brokers inside a VPC. It uses SASL/SCRAM-SHA-512; for SASL/PLAIN (Confluent Cloud) change the two lines its comments point to.
 

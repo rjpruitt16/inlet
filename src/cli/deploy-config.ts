@@ -29,6 +29,8 @@ export interface KafkaDeploySettings {
   saslMechanism: "scram-sha-512" | "scram-sha-256" | "plain";
   credentialsSecret: string;
   partitions: number;
+  /** Accept Aquifer's WebSocket transcript export (AQUIFER_WS_EXPORT_URL). */
+  websocketExport: boolean;
 }
 
 export interface InletFile {
@@ -135,11 +137,15 @@ function parseKafka(value: unknown): KafkaDeploySettings {
   if (!Number.isInteger(partitions) || (partitions as number) < 1 || (partitions as number) > 1000) {
     throw new ConfigurationError("deploy.kafka.partitions must be an integer from 1 to 1000");
   }
+  if (raw.websocket_export !== undefined && typeof raw.websocket_export !== "boolean") {
+    throw new ConfigurationError("deploy.kafka.websocket_export must be true or false");
+  }
   return {
     brokers,
     saslMechanism: mechanism,
     credentialsSecret: raw.credentials_secret,
     partitions: partitions as number,
+    websocketExport: raw.websocket_export === true,
   };
 }
 
@@ -163,4 +169,21 @@ export function awsSecretNames(file: InletFile): string[] {
  */
 export function completionSecretName(file: InletFile): string | undefined {
   return file.config.delivery === "kafka" ? `${file.deploy.name}-completion-key` : undefined;
+}
+
+/** The bearer token Aquifer's WebSocket export sends, when websocket_export is on. */
+export function websocketExportSecretName(file: InletFile): string | undefined {
+  return file.deploy.kafka?.websocketExport ? `${file.deploy.name}-ws-export-token` : undefined;
+}
+
+/** Secrets inlet deploy generates itself (random values nobody types in). */
+export function generatedSecrets(file: InletFile): Array<{ name: string; description: string }> {
+  const secrets: Array<{ name: string; description: string }> = [];
+  const completion = completionSecretName(file);
+  if (completion) secrets.push({ name: completion, description: `Signs Inlet completion URLs for ${file.deploy.name}` });
+  const websocket = websocketExportSecretName(file);
+  if (websocket) {
+    secrets.push({ name: websocket, description: `Token Aquifer's WebSocket export sends to ${file.deploy.name}` });
+  }
+  return secrets;
 }

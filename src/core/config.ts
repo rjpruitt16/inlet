@@ -24,6 +24,7 @@ const providers = new Set<ProviderName>([
 const kafkaDefaults: KafkaConfig = {
   eventsTopic: "inlet.events",
   resultsTopic: "inlet.results",
+  websocketTopic: "inlet.websocket",
   reconcile: { afterSeconds: 1_800, searchWindowSeconds: 3_600, maxRedrives: 3 },
 };
 
@@ -72,7 +73,16 @@ export function parseConfig(source: string): InletConfig {
   const delivery = parseDelivery(raw.delivery);
   const config: InletConfig = { aquiferUrl: aquifer.replace(/\/$/, ""), routes, confirmation, delivery };
   if (delivery === "kafka") {
-    config.kafka = parseKafka(raw.kafka);
+    const kafka = parseKafka(raw.kafka);
+    config.kafka = kafka;
+    const deliveryTopics = new Set([kafka.eventsTopic, kafka.resultsTopic]);
+    for (const route of routes) {
+      if (route.eventsTopic !== undefined) deliveryTopics.add(route.eventsTopic);
+      if (route.resultsTopic !== undefined) deliveryTopics.add(route.resultsTopic);
+    }
+    if (deliveryTopics.has(kafka.websocketTopic)) {
+      throw new ConfigurationError("kafka.websocket_topic must differ from every events and results topic");
+    }
     routes.forEach((route, index) => {
       if (route.completionUrl !== undefined) {
         throw new ConfigurationError(
@@ -114,6 +124,7 @@ function parseKafka(value: unknown): KafkaConfig {
   const parsed: KafkaConfig = {
     eventsTopic: optionalTopic(value.events_topic, kafkaDefaults.eventsTopic, "kafka.events_topic"),
     resultsTopic: optionalTopic(value.results_topic, kafkaDefaults.resultsTopic, "kafka.results_topic"),
+    websocketTopic: optionalTopic(value.websocket_topic, kafkaDefaults.websocketTopic, "kafka.websocket_topic"),
     reconcile: {
       afterSeconds: optionalInteger(r.after_seconds, defaults.afterSeconds, "kafka.reconcile.after_seconds", 1),
       searchWindowSeconds: optionalInteger(

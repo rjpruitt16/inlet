@@ -21,6 +21,7 @@ import { InletIntake } from "../../core/ingress.js";
 import { dispatchEvents } from "../../core/kafka/dispatch.js";
 import { KafkaEventQueue, recordCompletion } from "../../core/kafka/queue.js";
 import { reconcileTopic, type ReconcileSummary } from "../../core/kafka/reconcile.js";
+import { recordWebSocketBatch, websocketExportPath } from "../../core/kafka/websocket.js";
 import {
   completionPath,
   completionUrl,
@@ -66,6 +67,22 @@ export async function httpHandler(event: APIGatewayProxyEventV2): Promise<APIGat
     };
     const requestUrl = apiGatewayRequestUrl(event);
     if (requestUrl !== undefined) request.url = requestUrl;
+    if (
+      runtime.kafka &&
+      request.path === websocketExportPath &&
+      request.method.toUpperCase() === "POST" &&
+      process.env.INLET_WS_EXPORT_TOKEN_REF
+    ) {
+      const written = await recordWebSocketBatch(
+        request.headers,
+        request.body,
+        await runtime.secrets.resolve(process.env.INLET_WS_EXPORT_TOKEN_REF),
+        runtime.config,
+        runtime.kafka.writer,
+        Number(process.env.INLET_KAFKA_MAX_RECORD_BYTES ?? "") || undefined,
+      );
+      return jsonResponse(200, { written });
+    }
     if (runtime.kafka && request.path === completionPath && request.method.toUpperCase() === "POST") {
       const result = await recordCompletion(
         new URLSearchParams(event.rawQueryString ?? ""),

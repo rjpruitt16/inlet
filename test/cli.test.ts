@@ -221,6 +221,7 @@ test("init with every option writes a file deploy can read", async () => {
     saslMechanism: "scram-sha-256",
     credentialsSecret: "shop-kafka",
     partitions: 6,
+    websocketExport: false,
   });
   await assert.rejects(init({ file: path }), /already exists/);
 });
