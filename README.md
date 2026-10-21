@@ -129,6 +129,80 @@ Provider secrets are Worker secret bindings named by each route's `secret_ref`. 
 
 See [the Cloudflare deployment guide](examples/cloudflare/README.md) and its provider-specific [`wrangler.jsonc`](examples/cloudflare/wrangler.jsonc) example.
 
+## Kafka Delivery
+
+Set `delivery: kafka` to use your own Kafka instead of SQS FIFO: Confluent, Redpanda, MSK or self-hosted. Each deployment uses one mode. SQS stays the default and works exactly as before, with no reconciliation.
+
+Kafka mode adds a durable history of every webhook and every outcome, and a reconciler that redrives events that never finished, for example because an Aquifer machine disappeared with accepted jobs.
+
+```yaml
+aquifer_url: https://aquifer.internal.example
+delivery: kafka
+kafka:
+  events_topic: inlet.events       # default
+  results_topic: inlet.results     # default
+  reconcile:
+    after_seconds: 1800            # default: an event with no result after 30 minutes is overdue
+    search_window_seconds: 3600    # default: how far past an event to look for its result
+    max_redrives: 3                # default
+routes:
+  - id: github-main
+    path: /webhooks/github/main
+    provider: github
+    secret_ref: aws-secrets:github-webhook-secret
+    destination: https://backend.example.com/webhooks/github
+    events_topic: github.events    # optional, per route
+    results_topic: github.results  # optional, per route
+```
+
+How it works:
+
+1. The intake verifies the webhook and writes an `inlet.event.v1` record to the route's events topic before answering the provider. The Kafka key is the route and fairness identity, so one user's events share a partition and stay in order.
+2. Lambda's Kafka trigger delivers batches to the dispatcher. It submits each user's events to Aquifer in order, then confirms the whole batch with one wait, using the same two-observation check as SQS. It writes `owned` when Aquifer confirms it holds the job.
+3. Aquifer's completion webhook comes back to Inlet at a signed `/_inlet/completions` URL, and Inlet writes `completed` or `failed`. Aquifer and Spillway need no Kafka support.
+4. Every 5 minutes the reconciler reads the events topic from its own cursor (a consumer group's committed offsets) and stops at the first event that isn't overdue yet. For each overdue event it looks for a result in the results topic within `search_window_seconds`:
+   - `completed` or `dead_letter`: done.
+   - `failed`: redriven with a new Aquifer idempotency key, so Aquifer runs it again.
+   - No terminal result: redriven with the same key. If Aquifer still has the job it answers duplicate; if the job was lost it creates it again.
+   - After `max_redrives`, it writes `gave_up`.
+
+   A redrive is written to the events topic before it's recorded as `redriven`, and the cursor moves only after both, so a crash leaves at most a duplicate, which Aquifer deduplicates.
+
+### Records
+
+Events (`inlet.event.v1`): `delivery_id` (stable across redrives), `partition_key`, `event_id`, `event_type`, `provider`, `route_id`, `user_id`, `destination`, `method`, `content_type`, `headers`, `body_base64`, `received_at`, `written_at`, `reconcile_after`, `redrive`, `key_generation`, `idempotency_key`, `events_topic`, `results_topic`, and when present `max_retries`, `execute_before`, `traceparent`.
+
+Results (`inlet.result.v1`), keyed by `delivery_id`: `status` is one of `owned`, `completed`, `failed`, `dead_letter`, `redriven`, `gave_up`, plus `job_id`, `response_status`, `reason`, `redrive`, `key_generation`, `source` (`dispatch`, `completion` or `reconciler`) and `recorded_at`. The destination's response body isn't stored.
+
+### What "completed" means
+
+- `owned`: Aquifer confirmed it holds the job.
+- `completed`: the destination answered Aquifer with 2xx.
+- Whether your backend finished its own asynchronous work afterwards is outside what Inlet can see.
+
+Delivery is at least once. Every request carries `x-inlet-event-id` and `x-inlet-delivery-id`, so your backend can drop repeats. Exactly-once side effects need your backend to deduplicate on them.
+
+### Settings
+
+| Variable | Purpose |
+|---|---|
+| `INLET_KAFKA_BROKERS` | Comma-separated bootstrap servers |
+| `INLET_KAFKA_SASL_MECHANISM` | `scram-sha-512`, `scram-sha-256` or `plain`; unset for no SASL |
+| `INLET_KAFKA_SECRET_REF` | Secret with `{"username","password"}`, the same format Lambda's Kafka trigger reads |
+| `INLET_KAFKA_SSL` | `false` to turn TLS off (default on) |
+| `INLET_COMPLETION_SECRET_REF` | Key that signs completion URLs |
+| `INLET_PUBLIC_URL` | Inlet's public base URL, for completion URLs (dispatcher only) |
+| `INLET_KAFKA_RECONCILER_GROUP` | Consumer group that holds the reconciler's cursor (default `inlet-reconciler`) |
+
+[`examples/aws/template.kafka.yaml`](examples/aws/template.kafka.yaml) deploys the intake, dispatcher (`kafkaHandler`) and reconciler (`reconcileHandler`) against your Kafka. Create the topics first. The template uses SASL/SCRAM-SHA-512 over TLS; for SASL/PLAIN (Confluent Cloud) change the two lines its comments point to.
+
+Limits:
+
+- A Kafka partition holds many users. While one user's event is retried, other users' events in the same partition wait behind it. More partitions make that rarer.
+- Records are limited by your topic's maximum message size (1 MB by default).
+- `completion_url` can't be combined with Kafka mode, because Inlet receives completions itself.
+- Kafka mode runs on AWS today. Cloudflare support is planned.
+
 ## Aquifer Engineering
 
 The repository includes an [Aquifer Engineer skill](.agents/skills/aquifer-engineer/SKILL.md) for coding agents benchmarking backends, tuning Aqueduct pacing, partitioning Aquifer, configuring Valkey high availability, driving autoscaling, and designing priority tiers.

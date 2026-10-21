@@ -29,6 +29,7 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@aws-sdk/client-sqs": "^3.0.0",
+    "kafkajs": "^2.2.4",
     "yaml": "^2.0.0"
   },
   "devDependencies": {
