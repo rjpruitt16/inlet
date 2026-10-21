@@ -29,13 +29,17 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@aws-sdk/client-sqs": "^3.0.0",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3",
     "kafkajs": "^2.2.4",
     "yaml": "^2.0.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.0",
     "@types/node": "^24.0.0",
-    "esbuild": "^0.28.2",
     "typescript": "^5.9.0"
+  },
+  "bin": {
+    "inlet": "./dist/src/cli/bin.js"
   }
 }
