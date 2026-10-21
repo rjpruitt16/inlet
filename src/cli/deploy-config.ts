@@ -84,13 +84,20 @@ function parseDeploy(value: unknown, config: InletConfig): DeploySettings {
   }
 
   for (const route of config.routes) {
-    if (raw.platform === "aws" && !route.secretRef.startsWith("aws-secrets:")) {
-      throw new ConfigurationError(
-        `route ${route.id}: on AWS, set secret_ref to aws-secrets:<name> so inlet deploy can create and grant it`,
-      );
-    }
-    if (raw.platform === "cloudflare" && route.secretRef.includes(":") && !route.secretRef.startsWith("binding:")) {
-      throw new ConfigurationError(`route ${route.id}: on Cloudflare, secret_ref is a Worker secret name`);
+    const refs: Array<[string, string | undefined]> = [
+      ["secret_ref", route.secretRef],
+      ["verification_secret_ref", route.verificationSecretRef],
+    ];
+    for (const [field, ref] of refs) {
+      if (ref === undefined) continue;
+      if (raw.platform === "aws" && !ref.startsWith("aws-secrets:")) {
+        throw new ConfigurationError(
+          `route ${route.id}: on AWS, set ${field} to aws-secrets:<name> so inlet deploy can create and grant it`,
+        );
+      }
+      if (raw.platform === "cloudflare" && ref.includes(":") && !ref.startsWith("binding:")) {
+        throw new ConfigurationError(`route ${route.id}: on Cloudflare, ${field} is a Worker secret name`);
+      }
     }
   }
   return deploy;

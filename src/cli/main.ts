@@ -31,8 +31,8 @@ Secrets are asked for on the terminal, or read from INLET_SECRET_<NAME>
 
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
-  const options = parseOptions(rest);
   try {
+    const options = parseOptions(rest);
     switch (command) {
       case "init":
         await init(options);
@@ -106,7 +106,11 @@ export function parseOptions(args: string[]): Options {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (!arg.startsWith("--")) throw new CliError(`unexpected argument: ${arg}`);
-    const [key, inline] = arg.slice(2).split("=", 2) as [string, string | undefined];
+    const body = arg.slice(2);
+    const equals = body.indexOf("=");
+    // Split at the first = only: values such as URLs can contain more.
+    const key = equals === -1 ? body : body.slice(0, equals);
+    const inline = equals === -1 ? undefined : body.slice(equals + 1);
     if (inline !== undefined) {
       options[key] = inline;
     } else if (index + 1 < args.length && !args[index + 1]!.startsWith("--")) {

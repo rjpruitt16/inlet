@@ -105,13 +105,18 @@ export async function destroyCloudflare(file: InletFile): Promise<void> {
 }
 
 async function existingSecrets(worker: string): Promise<Set<string>> {
+  let output: string;
   try {
-    const listed = JSON.parse(await wrangler(["secret", "list", "--name", worker, "--format", "json"])) as Array<{ name: string }>;
-    return new Set(listed.map((secret) => secret.name));
-  } catch {
-    // The Worker doesn't exist yet.
-    return new Set();
+    output = await wrangler(["secret", "list", "--name", worker, "--format", "json"]);
+  } catch (error) {
+    // A Worker that doesn't exist yet has no secrets. Anything else (auth,
+    // network) must stop the deploy: treating it as "no secrets" would ask
+    // for, and overwrite, signing secrets that are already set.
+    if (/not found|does not exist|10007/i.test(String(error))) return new Set();
+    throw error;
   }
+  const listed = JSON.parse(output) as Array<{ name: string }>;
+  return new Set(listed.map((secret) => secret.name));
 }
 
 function wrangler(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {

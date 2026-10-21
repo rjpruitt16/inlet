@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { topicsFor } from "../core/kafka/records.js";
+import { CliError } from "./util.js";
 import type { InletFile } from "./deploy-config.js";
 
 /** The handler names inside the bundle (index.js), from src/runtimes/aws. */
@@ -156,21 +158,23 @@ export function awsTemplate(file: InletFile, secretArns: ReadonlyMap<string, str
     const accessType = { "scram-sha-512": "SASL_SCRAM_512_AUTH", "scram-sha-256": "SASL_SCRAM_256_AUTH", plain: "BASIC_AUTH" }[
       settings.saslMechanism
     ];
-    // Lambda's Kafka trigger takes one topic, so one trigger per events topic.
-    eventsTopics(file).forEach((topic, index) => {
-      resources[`KafkaTrigger${index}`] = {
+    // Lambda's Kafka trigger takes one topic, so one trigger per events
+    // topic. Each needs its own consumer group, and the logical ID comes
+    // from the topic so reordering routes doesn't replace a trigger.
+    for (const topic of eventsTopics(file)) {
+      resources[kafkaTriggerId(topic)] = {
         Type: "AWS::Lambda::EventSourceMapping",
         Properties: {
           FunctionName: { Ref: "DeliveryFunction" },
           Topics: [topic],
           SelfManagedEventSource: { Endpoints: { KafkaBootstrapServers: settings.brokers } },
           SourceAccessConfigurations: [{ Type: accessType, URI: requireArn(secretArns, settings.credentialsSecret) }],
-          SelfManagedKafkaEventSourceConfig: { ConsumerGroupId: `${file.deploy.name}-delivery` },
+          SelfManagedKafkaEventSourceConfig: { ConsumerGroupId: deliveryGroup(file, topic) },
           StartingPosition: "TRIM_HORIZON",
           BatchSize: 100,
         },
       };
-    });
+    }
     addFunction(resources, "ReconcileFunction", names.reconcile!, handlers.reconcile, 240, {
       ...sharedEnv,
       INLET_KAFKA_RECONCILER_GROUP: `${file.deploy.name}-reconciler`,
@@ -209,6 +213,7 @@ export function awsTemplate(file: InletFile, secretArns: ReadonlyMap<string, str
     };
   }
 
+  checkEnvironmentSize(resources);
   return {
     AWSTemplateFormatVersion: "2010-09-09",
     Description: `Inlet ${file.config.delivery === "kafka" ? "Kafka" : "SQS"} deployment ${file.deploy.name} (managed by inlet deploy)`,
@@ -227,6 +232,40 @@ export function eventsTopics(file: InletFile): string[] {
 export function resultsTopics(file: InletFile): string[] {
   if (file.config.delivery !== "kafka") return [];
   return unique(file.config.routes.map((route) => topicsFor(file.config, route).resultsTopic));
+}
+
+export function kafkaTriggerId(topic: string): string {
+  return `KafkaTrigger${createHash("sha256").update(topic).digest("hex").slice(0, 10)}`;
+}
+
+/** The delivery consumer group for one events topic; Lambda needs one per trigger. */
+export function deliveryGroup(file: InletFile, topic: string): string {
+  return `${file.deploy.name}-delivery-${topic}`;
+}
+
+// Lambda caps a function's environment variables at 4 KB in total.
+const environmentLimitBytes = 4096;
+
+/**
+ * Fails before deploying when a function's literal environment is over
+ * Lambda's limit, instead of CloudFormation failing halfway. Values set by
+ * CloudFormation (queue URLs, ARNs) are counted at a generous 200 bytes.
+ */
+function checkEnvironmentSize(resources: Json): void {
+  for (const [id, resource] of Object.entries(resources)) {
+    const variables = ((resource as Json).Properties as Json | undefined)?.Environment as Json | undefined;
+    const values = variables?.Variables as Json | undefined;
+    if (!values) continue;
+    let bytes = 0;
+    for (const [key, value] of Object.entries(values)) {
+      bytes += Buffer.byteLength(key) + (typeof value === "string" ? Buffer.byteLength(value) : 200);
+    }
+    if (bytes > environmentLimitBytes) {
+      throw new CliError(
+        `${id}'s environment would be about ${bytes} bytes, over Lambda's 4 KB limit; most of it is INLET_CONFIG. Split the routes across deployments, or shorten the config.`,
+      );
+    }
+  }
 }
 
 function addFunction(

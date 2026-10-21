@@ -73,7 +73,11 @@ npx @aqueduct/inlet deploy    # creates or updates everything, prints your webho
 - Running `deploy` again updates the deployment in place.
 - It never creates a Kafka cluster: you bring the brokers, reachable over TLS.
 
-`npx @aqueduct/inlet destroy` deletes the deployment. Secrets and Kafka topics are kept unless you pass `--delete-secrets`; topics are always kept, since they hold your event history.
+`npx @aqueduct/inlet destroy` deletes the deployment:
+
+- On AWS it deletes the stack, including its log groups. Secrets Manager secrets are kept unless you pass `--delete-secrets`.
+- On Cloudflare it deletes the Worker, which also removes its secrets and Durable Object data, and the dead-letter queue.
+- Kafka topics are always kept, since they hold your event history.
 
 Everything in `inlet.yml` except the `deploy:` block is the runtime configuration below:
 

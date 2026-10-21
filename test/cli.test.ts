@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { awsTemplate, eventsTopics, functionNames } from "../src/cli/aws-template.js";
+import { awsTemplate, deliveryGroup, eventsTopics, functionNames, kafkaTriggerId } from "../src/cli/aws-template.js";
 import { deadLetterQueue, workerSecretNames, wranglerConfig } from "../src/cli/cloudflare.js";
 import { awsSecretNames, parseInletFile } from "../src/cli/deploy-config.js";
 import { init } from "../src/cli/init.js";
@@ -99,13 +99,21 @@ test("the Kafka template has one trigger per events topic, the reconciler and it
   const resources = template.Resources;
 
   assert.deepEqual(eventsTopics(file), ["inlet.events", "billing.events"]);
-  assert.deepEqual(resources.KafkaTrigger0.Properties.Topics, ["inlet.events"]);
-  assert.deepEqual(resources.KafkaTrigger1.Properties.Topics, ["billing.events"]);
-  assert.deepEqual(resources.KafkaTrigger0.Properties.SelfManagedEventSource.Endpoints.KafkaBootstrapServers, [
+  const main = resources[kafkaTriggerId("inlet.events")];
+  const billing = resources[kafkaTriggerId("billing.events")];
+  assert.deepEqual(main.Properties.Topics, ["inlet.events"]);
+  assert.deepEqual(billing.Properties.Topics, ["billing.events"]);
+  assert.notEqual(
+    main.Properties.SelfManagedKafkaEventSourceConfig.ConsumerGroupId,
+    billing.Properties.SelfManagedKafkaEventSourceConfig.ConsumerGroupId,
+    "Lambda needs a consumer group per Kafka trigger",
+  );
+  assert.equal(deliveryGroup(file, "billing.events"), "inlet-hooks-delivery-billing.events");
+  assert.deepEqual(main.Properties.SelfManagedEventSource.Endpoints.KafkaBootstrapServers, [
     "broker-1.example.com:9093",
     "broker-2.example.com:9093",
   ]);
-  assert.equal(resources.KafkaTrigger0.Properties.SourceAccessConfigurations[0].Type, "SASL_SCRAM_512_AUTH");
+  assert.equal(main.Properties.SourceAccessConfigurations[0].Type, "SASL_SCRAM_512_AUTH");
   assert.equal(resources.DeliveryFunction.Properties.Handler, "index.kafkaHandler");
   assert.deepEqual(resources.DeliveryFunction.Properties.Environment.Variables.INLET_PUBLIC_URL, {
     "Fn::GetAtt": ["Api", "ApiEndpoint"],
@@ -142,12 +150,23 @@ deploy:
   assert.deepEqual(workerSecretNames(file), ["GITHUB_WEBHOOK_SECRET"]);
 });
 
-test("parseOptions reads --key value, --key=value and flags", () => {
-  assert.deepEqual(parseOptions(["--platform", "aws", "--name=inlet-x", "--force"]), {
+test("parseOptions reads --key value, --key=value and flags, keeping = inside values", () => {
+  assert.deepEqual(parseOptions(["--platform", "aws", "--destination=https://b.example/hook?a=b", "--force"]), {
     platform: "aws",
-    name: "inlet-x",
+    destination: "https://b.example/hook?a=b",
     force: true,
   });
+});
+
+test("deploy config checks verification secrets too, and the Lambda environment size", () => {
+  const whatsapp = sqsFile
+    .replace("provider: github", "provider: whatsapp")
+    .replace("    destination:", "    verification_secret_ref: env:VERIFY\n    destination:");
+  assert.throws(() => parseInletFile(whatsapp), /set verification_secret_ref to aws-secrets/);
+
+  const big = parseInletFile(sqsFile);
+  big.runtimeYaml += `# ${"x".repeat(5000)}\n`;
+  assert.throws(() => awsTemplate(big, arns(awsSecretNames(big))), /over Lambda's 4 KB limit/);
 });
 
 test("init with every option writes a file deploy can read", async () => {

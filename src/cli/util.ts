@@ -68,12 +68,14 @@ export async function ask(question: string, fallback?: string): Promise<string> 
     throw new CliError(`${question} (no terminal to ask on; pass it as an option)`);
   }
   const rl = createInterface({ input: stdin, output: stdout });
+  let answer: string;
   try {
-    const answer = (await rl.question(fallback ? `${question} [${fallback}]: ` : `${question}: `)).trim();
-    return answer || fallback || (await ask(question, fallback));
+    answer = (await rl.question(fallback ? `${question} [${fallback}]: ` : `${question}: `)).trim();
   } finally {
+    // Closed before any retry, so two prompts never read stdin at once.
     rl.close();
   }
+  return answer || fallback || ask(question, fallback);
 }
 
 export async function choose<T extends string>(question: string, choices: readonly T[], fallback: T): Promise<T> {
