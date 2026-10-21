@@ -1,0 +1,180 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { awsTemplate, eventsTopics, functionNames } from "../src/cli/aws-template.js";
+import { deadLetterQueue, workerSecretNames, wranglerConfig } from "../src/cli/cloudflare.js";
+import { awsSecretNames, parseInletFile } from "../src/cli/deploy-config.js";
+import { init } from "../src/cli/init.js";
+import { parseOptions } from "../src/cli/main.js";
+
+const sqsFile = `
+aquifer_url: https://aquifer.example.com
+routes:
+  - id: github-main
+    path: /webhooks/github/main
+    provider: github
+    secret_ref: aws-secrets:inlet-github-webhook-secret
+    destination: https://backend.example.com/github
+deploy:
+  platform: aws
+  name: inlet-github
+  region: us-east-2
+`;
+
+const kafkaFile = `
+aquifer_url: https://aquifer.example.com
+delivery: kafka
+routes:
+  - id: github-main
+    path: /webhooks/github/main
+    provider: github
+    secret_ref: aws-secrets:inlet-github-webhook-secret
+    destination: https://backend.example.com/github
+  - id: stripe-main
+    path: /webhooks/stripe/main
+    provider: stripe
+    secret_ref: aws-secrets:inlet-stripe-webhook-secret
+    destination: https://backend.example.com/stripe
+    events_topic: billing.events
+deploy:
+  platform: aws
+  name: inlet-hooks
+  kafka:
+    brokers: broker-1.example.com:9093,broker-2.example.com:9093
+    credentials_secret: inlet-kafka
+`;
+
+const arns = (names: string[]) =>
+  new Map(names.map((name) => [name, `arn:aws:secretsmanager:us-east-2:123456789012:secret:${name}-AbCdEf`]));
+
+test("the deploy block is read and kept out of INLET_CONFIG", () => {
+  const file = parseInletFile(sqsFile);
+  assert.deepEqual(file.deploy, { platform: "aws", name: "inlet-github", region: "us-east-2" });
+  assert.ok(!file.runtimeYaml.includes("deploy"), "the runtime never sees deploy:");
+  assert.equal(file.config.routes[0]?.id, "github-main");
+  assert.deepEqual(awsSecretNames(file), ["inlet-github-webhook-secret"]);
+});
+
+test("the deploy block rejects settings that can't work", () => {
+  assert.throws(() => parseInletFile(sqsFile.replace(/deploy:[\s\S]*/, "")), /needs a deploy: block/);
+  assert.throws(() => parseInletFile(sqsFile.replace("name: inlet-github", "name: 9bad")), /deploy.name/);
+  assert.throws(
+    () => parseInletFile(sqsFile.replace("aws-secrets:inlet-github-webhook-secret", "GITHUB_SECRET")),
+    /set secret_ref to aws-secrets/,
+  );
+  assert.throws(() => parseInletFile(kafkaFile.replace(/  kafka:[\s\S]*/, "")), /needs deploy.kafka/);
+  assert.throws(
+    () => parseInletFile(kafkaFile.replace("platform: aws", "platform: cloudflare").replace(/aws-secrets:/g, "")),
+    /isn't available on Cloudflare yet/,
+  );
+});
+
+test("the SQS template has a FIFO queue, both functions and one public API", () => {
+  const file = parseInletFile(sqsFile);
+  const template = awsTemplate(file, arns(awsSecretNames(file))) as { Resources: Record<string, any> };
+  const resources = template.Resources;
+
+  assert.equal(resources.Queue.Properties.QueueName, "inlet-github.fifo");
+  assert.equal(resources.Queue.Properties.FifoQueue, true);
+  assert.equal(resources.HttpFunction.Properties.FunctionName, "inlet-github-http");
+  assert.equal(resources.HttpFunction.Properties.Handler, "index.httpHandler");
+  assert.equal(resources.DeliveryFunction.Properties.Handler, "index.queueHandler");
+  assert.equal(resources.QueueTrigger.Properties.FunctionResponseTypes[0], "ReportBatchItemFailures");
+  assert.equal(resources.Api.Properties.ProtocolType, "HTTP");
+  assert.equal(resources.HttpFunctionLogs.Properties.LogGroupName, "/aws/lambda/inlet-github-http");
+  assert.equal(resources.ReconcileFunction, undefined, "SQS mode has no reconciler");
+  assert.ok(!JSON.stringify(resources).includes("deploy:"), "INLET_CONFIG has no deploy block");
+
+  const secretGrant = resources.Role.Properties.Policies[0].PolicyDocument.Statement[0];
+  assert.deepEqual(secretGrant.Resource, [
+    "arn:aws:secretsmanager:us-east-2:123456789012:secret:inlet-github-webhook-secret-AbCdEf",
+  ]);
+});
+
+test("the Kafka template has one trigger per events topic, the reconciler and its schedule", () => {
+  const file = parseInletFile(kafkaFile);
+  const template = awsTemplate(file, arns(awsSecretNames(file))) as { Resources: Record<string, any> };
+  const resources = template.Resources;
+
+  assert.deepEqual(eventsTopics(file), ["inlet.events", "billing.events"]);
+  assert.deepEqual(resources.KafkaTrigger0.Properties.Topics, ["inlet.events"]);
+  assert.deepEqual(resources.KafkaTrigger1.Properties.Topics, ["billing.events"]);
+  assert.deepEqual(resources.KafkaTrigger0.Properties.SelfManagedEventSource.Endpoints.KafkaBootstrapServers, [
+    "broker-1.example.com:9093",
+    "broker-2.example.com:9093",
+  ]);
+  assert.equal(resources.KafkaTrigger0.Properties.SourceAccessConfigurations[0].Type, "SASL_SCRAM_512_AUTH");
+  assert.equal(resources.DeliveryFunction.Properties.Handler, "index.kafkaHandler");
+  assert.deepEqual(resources.DeliveryFunction.Properties.Environment.Variables.INLET_PUBLIC_URL, {
+    "Fn::GetAtt": ["Api", "ApiEndpoint"],
+  });
+  assert.equal(resources.ReconcileFunction.Properties.Handler, "index.reconcileHandler");
+  assert.equal(resources.ReconcileSchedule.Properties.ScheduleExpression, "rate(5 minutes)");
+  assert.deepEqual(resources.ReconcileSchedule.DependsOn, ["ReconcilePermission"], "the permission exists before the first firing");
+  assert.deepEqual(resources.ReconcilePermission.Properties.SourceArn, {
+    "Fn::Sub": "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/inlet-hooks-reconcile",
+  });
+  assert.equal(resources.Queue, undefined, "Kafka mode has no SQS queue");
+  assert.deepEqual(functionNames(file), {
+    http: "inlet-hooks-http",
+    delivery: "inlet-hooks-delivery",
+    reconcile: "inlet-hooks-reconcile",
+  });
+});
+
+test("the Cloudflare config binds the ordered queue and dead-letter queue", () => {
+  const file = parseInletFile(`
+aquifer_url: https://aquifer.example.com
+routes:
+  - { id: github-main, path: /webhooks/github/main, provider: github, secret_ref: GITHUB_WEBHOOK_SECRET, destination: https://backend.example.com/github }
+deploy:
+  platform: cloudflare
+  name: inlet-github
+`);
+  const config = wranglerConfig(file) as Record<string, any>;
+  assert.equal(config.name, "inlet-github");
+  assert.ok(String(config.main).endsWith("runtimes/cloudflare/runtime.js"));
+  assert.equal(config.durable_objects.bindings[0].class_name, "InletQueueObject");
+  assert.equal(config.queues.producers[0].queue, deadLetterQueue(file));
+  assert.ok(!String(config.vars.INLET_CONFIG).includes("deploy"));
+  assert.deepEqual(workerSecretNames(file), ["GITHUB_WEBHOOK_SECRET"]);
+});
+
+test("parseOptions reads --key value, --key=value and flags", () => {
+  assert.deepEqual(parseOptions(["--platform", "aws", "--name=inlet-x", "--force"]), {
+    platform: "aws",
+    name: "inlet-x",
+    force: true,
+  });
+});
+
+test("init with every option writes a file deploy can read", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "inlet-init-"));
+  const path = join(dir, "inlet.yml");
+  await init({
+    file: path,
+    platform: "aws",
+    delivery: "kafka",
+    provider: "shopify",
+    name: "inlet-shop",
+    path: "/webhooks/shopify/main",
+    destination: "https://backend.example.com/shopify",
+    "aquifer-url": "https://aquifer.example.com",
+    region: "us-east-2",
+    "kafka-brokers": "broker.example.com:9093",
+    "kafka-sasl": "scram-sha-256",
+    "kafka-secret": "shop-kafka",
+  });
+  const file = parseInletFile(await readFile(path, "utf8"));
+  assert.equal(file.config.delivery, "kafka");
+  assert.equal(file.config.routes[0]?.secretRef, "aws-secrets:inlet-shop-webhook-secret");
+  assert.deepEqual(file.deploy.kafka, {
+    brokers: ["broker.example.com:9093"],
+    saslMechanism: "scram-sha-256",
+    credentialsSecret: "shop-kafka",
+    partitions: 6,
+  });
+  await assert.rejects(init({ file: path }), /already exists/);
+});

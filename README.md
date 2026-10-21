@@ -48,6 +48,49 @@ flowchart LR
 
 On AWS, each provider stack contains an HTTP intake Lambda, an SQS FIFO queue, and a delivery Lambda. On Cloudflare, it contains a Worker and per-fairness-key Durable Objects whose alarms deliver to Aquifer.
 
+## Deploy With The CLI
+
+Two commands set up a complete deployment from one `inlet.yml`:
+
+```bash
+npx @aqueduct/inlet init      # answer a few questions; writes inlet.yml
+npx @aqueduct/inlet deploy    # creates or updates everything, prints your webhook URL
+```
+
+`init` asks where Inlet runs (AWS or Cloudflare), the delivery mode on AWS (SQS, or your own Kafka), the provider, your backend URL and Aquifer's URL. Every question also has a flag, such as `--platform aws --delivery kafka --provider github`, for scripts. `npx @aqueduct/inlet help` lists them.
+
+`deploy` reads `inlet.yml` and creates what that setup needs:
+
+| Setup | What deploy creates |
+|---|---|
+| AWS + SQS | Intake and delivery Lambdas, an HTTP API, FIFO queue and dead-letter queue, IAM role, log groups |
+| AWS + Kafka | Intake, delivery and reconciler Lambdas, an HTTP API, a Kafka trigger per events topic, the 5-minute reconcile schedule, the completion signing secret, and any missing topics |
+| Cloudflare | The Worker with its ordered-queue Durable Object, and the dead-letter queue |
+
+- On AWS it bundles the code itself, so it needs only the AWS CLI with working credentials: no Docker, SAM or S3 bucket.
+- On Cloudflare it uses Wrangler and your `wrangler login`.
+- Secrets that don't exist yet (provider signing secrets, Kafka credentials) are asked for once and stored in Secrets Manager or as Worker secrets. Without a terminal, it reads them from `INLET_SECRET_<NAME>` (and `INLET_KAFKA_USERNAME`).
+- Running `deploy` again updates the deployment in place.
+- It never creates a Kafka cluster: you bring the brokers, reachable over TLS.
+
+`npx @aqueduct/inlet destroy` deletes the deployment. Secrets and Kafka topics are kept unless you pass `--delete-secrets`; topics are always kept, since they hold your event history.
+
+Everything in `inlet.yml` except the `deploy:` block is the runtime configuration below:
+
+```yaml
+deploy:
+  platform: aws              # aws | cloudflare
+  name: inlet-github         # stack or Worker name
+  region: us-east-2          # aws only
+  kafka:                     # delivery: kafka only
+    brokers: broker-1.example.com:9093
+    sasl_mechanism: scram-sha-512
+    credentials_secret: inlet-github-kafka
+    partitions: 6
+```
+
+The SAM templates in [`examples/aws`](examples/aws) and the Wrangler config in [`examples/cloudflare`](examples/cloudflare) remain for teams that manage their own infrastructure as code.
+
 ## Delivery
 
 Event delivery is queue-first. Provider setup challenges are verified and answered immediately without entering the queue:
