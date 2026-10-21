@@ -1,0 +1,14 @@
+# CodeRabbit settings for this repository. inheritance keeps the
+# organization's settings and adds these instructions on top.
+inheritance: true
+reviews:
+  path_instructions:
+    - path: "src/**/*.ts"
+      instructions: |
+        Treat anything that can make memory, goroutines/processes, file descriptors or Valkey/Redis data grow without a bound as a **major** finding, and title it "Possible memory leak". This project runs long-lived servers that were soak-tested for a week, and a leak would mean repeating that test. For each one, say what grows, what would bound it, and which test or metric would show it.
+        Inlet runs in Lambda containers, Workers and Durable Objects that live for a long time. Look for:
+        - module-level maps or caches that only grow across invocations;
+        - Kafka producers, consumers or admin clients that are created per call and not disconnected;
+        - setTimeout/setInterval or event listeners that are never cleared;
+        - Durable Object storage keys that are written and never deleted;
+        - promises or retries that can pile up without a bound.
