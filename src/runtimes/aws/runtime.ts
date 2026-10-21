@@ -79,6 +79,7 @@ export async function httpHandler(event: APIGatewayProxyEventV2): Promise<APIGat
         await runtime.secrets.resolve(process.env.INLET_WS_EXPORT_TOKEN_REF),
         runtime.config,
         runtime.kafka.writer,
+        Number(process.env.INLET_KAFKA_MAX_RECORD_BYTES ?? "") || undefined,
       );
       return jsonResponse(200, { written });
     }

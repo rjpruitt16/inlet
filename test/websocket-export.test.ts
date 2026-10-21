@@ -73,6 +73,30 @@ test("a batch with a wrong or missing token, or a bad event, is refused and noth
   assert.equal(writer.writes.length, 0, "a partly bad batch writes nothing, so Aquifer's retry can't double it");
 });
 
+test("a batch with a record over the size limit gets 413 and writes nothing", async () => {
+  const writer = memoryWriter();
+  const big = event("s1", "2-0", { payload: { blob: "x".repeat(2_000) } });
+  await assert.rejects(
+    recordWebSocketBatch({ authorization: "Bearer tok" }, batch([event("s1", "1-0"), big]), "tok", config, writer, 1_000),
+    (error: Error & { statusCode?: number }) => error.statusCode === 413,
+  );
+  assert.equal(writer.writes.length, 0);
+});
+
+test("the WebSocket topic can't be a delivery topic", () => {
+  assert.throws(
+    () =>
+      parseConfig(`
+aquifer_url: https://aquifer.example.com
+delivery: kafka
+kafka: { websocket_topic: inlet.events }
+routes:
+  - { id: a, path: /a, provider: github, secret_ref: GH, destination: https://b.example/a }
+`),
+    /websocket_topic must differ/,
+  );
+});
+
 const kafkaFile = (websocketExport: boolean) => `
 aquifer_url: https://aquifer.example.com
 delivery: kafka

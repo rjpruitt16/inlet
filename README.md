@@ -243,6 +243,7 @@ Delivery is at least once. Every request carries `x-inlet-event-id` and `x-inlet
 | `INLET_PUBLIC_URL` | Inlet's public base URL, for completion URLs (dispatcher only) |
 | `INLET_KAFKA_RECONCILER_GROUP` | Consumer group that holds the reconciler's cursor (default `inlet-reconciler`) |
 | `INLET_WS_EXPORT_TOKEN_REF` | Bearer token Aquifer's WebSocket export must send; turns on `/_inlet/websocket-events` |
+| `INLET_KAFKA_MAX_RECORD_BYTES` | Largest WebSocket record to write (default 1,000,000, Kafka's default message size); a batch with a larger one gets 413 |
 
 ### WebSocket transcripts
 

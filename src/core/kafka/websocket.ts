@@ -7,6 +7,13 @@ import type { KafkaWriter } from "./queue.js";
 export const websocketExportPath = "/_inlet/websocket-events";
 
 /**
+ * Kafka's default maximum message size is 1 MB; INLET_KAFKA_MAX_RECORD_BYTES
+ * overrides it for topics configured larger. A larger record would fail
+ * partway through the write, so the batch is refused first.
+ */
+export const defaultMaxRecordBytes = 1_000_000;
+
+/**
  * One WebSocket message on the WebSocket topic, keyed by session_id so a
  * session's messages stay in order. Exported at least once: drop repeats
  * by session_id + stream_id.
@@ -39,6 +46,7 @@ export async function recordWebSocketBatch(
   token: string,
   config: InletConfig,
   writer: KafkaWriter,
+  maxRecordBytes = defaultMaxRecordBytes,
 ): Promise<number> {
   if (config.kafka === undefined) {
     throw new InletError("WebSocket export needs delivery: kafka", 404, "not_found");
@@ -65,7 +73,17 @@ export async function recordWebSocketBatch(
     if (record === undefined) {
       throw new InletError("every event needs session_id, stream_id, direction, type and recorded_at", 400, "invalid_batch");
     }
-    messages.push({ key: record.session_id, value: JSON.stringify(record), timestamp: record.recorded_at });
+    const value = JSON.stringify(record);
+    if (new TextEncoder().encode(value).length > maxRecordBytes) {
+      // 413: Aquifer halves the batch, and skips a single message that
+      // still doesn't fit.
+      throw new InletError(
+        `message ${record.session_id}/${record.stream_id} is over the ${maxRecordBytes}-byte record limit`,
+        413,
+        "record_too_large",
+      );
+    }
+    messages.push({ key: record.session_id, value, timestamp: record.recorded_at });
   }
   await writer.write(config.kafka.websocketTopic, messages);
   return messages.length;

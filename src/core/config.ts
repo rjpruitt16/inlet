@@ -73,7 +73,16 @@ export function parseConfig(source: string): InletConfig {
   const delivery = parseDelivery(raw.delivery);
   const config: InletConfig = { aquiferUrl: aquifer.replace(/\/$/, ""), routes, confirmation, delivery };
   if (delivery === "kafka") {
-    config.kafka = parseKafka(raw.kafka);
+    const kafka = parseKafka(raw.kafka);
+    config.kafka = kafka;
+    const deliveryTopics = new Set([kafka.eventsTopic, kafka.resultsTopic]);
+    for (const route of routes) {
+      if (route.eventsTopic !== undefined) deliveryTopics.add(route.eventsTopic);
+      if (route.resultsTopic !== undefined) deliveryTopics.add(route.resultsTopic);
+    }
+    if (deliveryTopics.has(kafka.websocketTopic)) {
+      throw new ConfigurationError("kafka.websocket_topic must differ from every events and results topic");
+    }
     routes.forEach((route, index) => {
       if (route.completionUrl !== undefined) {
         throw new ConfigurationError(
