@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { topicsFor } from "../core/kafka/records.js";
 import { CliError } from "./util.js";
-import { completionSecretName, type InletFile } from "./deploy-config.js";
+import { completionSecretName, websocketExportSecretName, type InletFile } from "./deploy-config.js";
 
 /** The handler names inside the bundle (index.js), from src/runtimes/aws. */
 export const handlers = {
@@ -63,6 +63,7 @@ export function awsTemplate(file: InletFile, secretArns: ReadonlyMap<string, str
         ...(kafka
           ? [requireArn(secretArns, file.deploy.kafka!.credentialsSecret), requireArn(secretArns, completionSecretName(file)!)]
           : []),
+        ...(websocketExportSecretName(file) ? [requireArn(secretArns, websocketExportSecretName(file)!)] : []),
       ]),
     },
   ];
@@ -102,6 +103,8 @@ export function awsTemplate(file: InletFile, secretArns: ReadonlyMap<string, str
       INLET_KAFKA_SECRET_REF: `aws-secrets:${requireArn(secretArns, settings.credentialsSecret)}`,
       INLET_COMPLETION_SECRET_REF: `aws-secrets:${requireArn(secretArns, completionSecretName(file)!)}`,
     });
+    const websocketToken = websocketExportSecretName(file);
+    if (websocketToken) sharedEnv.INLET_WS_EXPORT_TOKEN_REF = `aws-secrets:${requireArn(secretArns, websocketToken)}`;
   } else {
     Object.assign(sharedEnv, { INLET_QUEUE_URL: { Ref: "Queue" }, INLET_DLQ_URL: { Ref: "DeadLetterQueue" } });
     resources.DeadLetterQueue = {

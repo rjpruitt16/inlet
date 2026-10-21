@@ -24,6 +24,7 @@ const providers = new Set<ProviderName>([
 const kafkaDefaults: KafkaConfig = {
   eventsTopic: "inlet.events",
   resultsTopic: "inlet.results",
+  websocketTopic: "inlet.websocket",
   reconcile: { afterSeconds: 1_800, searchWindowSeconds: 3_600, maxRedrives: 3 },
 };
 
@@ -114,6 +115,7 @@ function parseKafka(value: unknown): KafkaConfig {
   const parsed: KafkaConfig = {
     eventsTopic: optionalTopic(value.events_topic, kafkaDefaults.eventsTopic, "kafka.events_topic"),
     resultsTopic: optionalTopic(value.results_topic, kafkaDefaults.resultsTopic, "kafka.results_topic"),
+    websocketTopic: optionalTopic(value.websocket_topic, kafkaDefaults.websocketTopic, "kafka.websocket_topic"),
     reconcile: {
       afterSeconds: optionalInteger(r.after_seconds, defaults.afterSeconds, "kafka.reconcile.after_seconds", 1),
       searchWindowSeconds: optionalInteger(

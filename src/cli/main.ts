@@ -69,6 +69,14 @@ async function deploy(file: InletFile): Promise<void> {
     const result = await deployAws(file, workDir);
     log(`\nDeployed ${file.deploy.name}. Point your provider's webhooks at:`);
     for (const route of routes) log(`  ${route.id}: ${result.webhookBaseUrl}${route.path}`);
+    if (result.websocketExport) {
+      const { url, tokenSecret, region } = result.websocketExport;
+      log(`\nTo export Aquifer's WebSocket transcripts to Kafka, set on Aquifer:`);
+      log("  AQUIFER_WS_EXPORT_ENABLED=true");
+      log(`  AQUIFER_WS_EXPORT_URL=${url}`);
+      log(`  AQUIFER_WS_EXPORT_TOKEN=<value of secret ${tokenSecret}>`);
+      log(`  (aws secretsmanager get-secret-value --region ${region} --secret-id ${tokenSecret} --query SecretString --output text)`);
+    }
   } else {
     const result = await deployCloudflare(file, workDir);
     log(`\nDeployed ${file.deploy.name}. Point your provider's webhooks at:`);

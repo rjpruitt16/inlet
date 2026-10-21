@@ -10,4 +10,5 @@ export * from "./providers/index.js";
 export * from "./core/kafka/dispatch.js";
 export * from "./core/kafka/queue.js";
 export * from "./core/kafka/reconcile.js";
+export * from "./core/kafka/websocket.js";
 export * from "./core/kafka/records.js";

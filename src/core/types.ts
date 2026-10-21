@@ -85,6 +85,8 @@ export interface KafkaReconcileConfig {
 export interface KafkaConfig {
   eventsTopic: string;
   resultsTopic: string;
+  /** Where Aquifer's exported WebSocket transcripts are written. */
+  websocketTopic: string;
   reconcile: KafkaReconcileConfig;
 }
 

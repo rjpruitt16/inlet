@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { Kafka, logLevel, type SASLOptions } from "kafkajs";
 import { awsTemplate, eventsTopics, functionNames, resultsTopics } from "./aws-template.js";
 import { bundleAwsHandlers } from "./bundle.js";
-import { awsSecretNames, completionSecretName, type InletFile } from "./deploy-config.js";
+import { awsSecretNames, generatedSecrets, websocketExportSecretName, type InletFile } from "./deploy-config.js";
 import { ask, CliError, log, run, secretValue, step } from "./util.js";
 
 export interface AwsDeployResult {
   webhookBaseUrl: string;
   createdSecrets: string[];
+  /** Set when deploy.kafka.websocket_export is on: what to give Aquifer. */
+  websocketExport?: { url: string; tokenSecret: string; region: string };
 }
 
 export async function deployAws(file: InletFile, workDir: string): Promise<AwsDeployResult> {
@@ -66,7 +68,10 @@ export async function deployAws(file: InletFile, workDir: string): Promise<AwsDe
   ) as Array<{ OutputKey: string; OutputValue: string }>;
   const webhookBaseUrl = outputs.find((output) => output.OutputKey === "WebhookBaseUrl")?.OutputValue;
   if (!webhookBaseUrl) throw new CliError("the stack has no WebhookBaseUrl output");
-  return { webhookBaseUrl, createdSecrets: created };
+  const result: AwsDeployResult = { webhookBaseUrl, createdSecrets: created };
+  const tokenSecret = websocketExportSecretName(file);
+  if (tokenSecret) result.websocketExport = { url: `${webhookBaseUrl}/_inlet/websocket-events`, tokenSecret, region };
+  return result;
 }
 
 export async function destroyAws(file: InletFile, deleteSecrets: boolean): Promise<void> {
@@ -79,8 +84,7 @@ export async function destroyAws(file: InletFile, deleteSecrets: boolean): Promi
 
   if (deleteSecrets) {
     step("Deleting secrets");
-    const completion = completionSecretName(file);
-    for (const name of [...awsSecretNames(file), ...(completion ? [completion] : [])]) {
+    for (const name of [...awsSecretNames(file), ...generatedSecrets(file).map((secret) => secret.name)]) {
       try {
         await aws(["secretsmanager", "delete-secret", "--secret-id", name, "--force-delete-without-recovery"], region);
         log(`  ${name}`);
@@ -125,20 +129,19 @@ async function ensureSecrets(
     log(`  ${name}: created`);
   }
 
-  const completion = completionSecretName(file);
-  if (completion) {
-    let arn = await secretArn(completion, region);
+  for (const { name, description } of generatedSecrets(file)) {
+    let arn = await secretArn(name, region);
     if (arn) {
-      log(`  ${completion}: exists`);
+      log(`  ${name}: exists`);
     } else {
       const key = randomBytes(32).toString("hex");
       arn = (
-        await aws(["secretsmanager", "create-secret", "--name", completion, "--description", `Signs Inlet completion URLs for ${file.deploy.name}`, "--secret-string", "file:///dev/stdin", "--query", "ARN", "--output", "text"], region, { input: key })
+        await aws(["secretsmanager", "create-secret", "--name", name, "--description", description, "--secret-string", "file:///dev/stdin", "--query", "ARN", "--output", "text"], region, { input: key })
       ).trim();
-      created.push(completion);
-      log(`  ${completion}: created (generated)`);
+      created.push(name);
+      log(`  ${name}: created (generated)`);
     }
-    arns.set(completion, arn);
+    arns.set(name, arn);
   }
   return { arns, created };
 }
@@ -178,7 +181,11 @@ async function ensureTopics(file: InletFile, region: string, arns: Map<string, s
   }
   try {
     const existing = new Set(await admin.listTopics());
-    const wanted = [...eventsTopics(file), ...resultsTopics(file)];
+    const wanted = [
+      ...eventsTopics(file),
+      ...resultsTopics(file),
+      ...(settings.websocketExport ? [file.config.kafka!.websocketTopic] : []),
+    ];
     const missing = wanted.filter((topic) => !existing.has(topic));
     for (const topic of wanted.filter((topic) => existing.has(topic))) log(`  ${topic}: exists`);
     if (missing.length > 0) {
