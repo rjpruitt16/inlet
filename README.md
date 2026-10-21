@@ -64,7 +64,7 @@ npx @aqueduct/inlet deploy    # creates or updates everything, prints your webho
 | Setup | What deploy creates |
 |---|---|
 | AWS + SQS | Intake and delivery Lambdas, an HTTP API, FIFO queue and dead-letter queue, IAM role, log groups |
-| AWS + Kafka | Intake, delivery and reconciler Lambdas, an HTTP API, a Kafka trigger per events topic, the 5-minute reconcile schedule, the completion signing secret, and any missing topics |
+| AWS + Kafka | Intake, delivery and reconciler Lambdas, an HTTP API, a Kafka trigger per events topic, the 5-minute reconcile schedule, a generated completion signing key (`<name>-completion-key`), and any missing topics |
 | Cloudflare | The Worker with its ordered-queue Durable Object, and the dead-letter queue |
 
 - On AWS it bundles the code itself, so it needs only the AWS CLI with working credentials: no Docker, SAM or S3 bucket.
@@ -75,7 +75,7 @@ npx @aqueduct/inlet deploy    # creates or updates everything, prints your webho
 
 `npx @aqueduct/inlet destroy` deletes the deployment:
 
-- On AWS it deletes the stack, including its log groups. Secrets Manager secrets are kept unless you pass `--delete-secrets`.
+- On AWS it deletes the stack, including its log groups. Secrets Manager secrets, including the completion signing key, are kept unless you pass `--delete-secrets`, so a redeploy picks up where it left off.
 - On Cloudflare it deletes the Worker, which also removes its secrets and Durable Object data, and the dead-letter queue.
 - Kafka topics are always kept, since they hold your event history.
 
