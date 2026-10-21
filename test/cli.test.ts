@@ -47,6 +47,8 @@ deploy:
 `;
 
 const arns = (names: string[]) =>
+  arnMap([...names, "inlet-hooks-completion-key"]);
+const arnMap = (names: string[]) =>
   new Map(names.map((name) => [name, `arn:aws:secretsmanager:us-east-2:123456789012:secret:${name}-AbCdEf`]));
 
 test("the deploy block is read and kept out of INLET_CONFIG", () => {
@@ -156,6 +158,31 @@ test("parseOptions reads --key value, --key=value and flags, keeping = inside va
     destination: "https://b.example/hook?a=b",
     force: true,
   });
+});
+
+test("parseOptions rejects unknown options and missing values", () => {
+  assert.throws(() => parseOptions(["--fiel", "x.yml"]), /unknown option: --fiel/);
+  assert.throws(() => parseOptions(["--file", "--delete-secrets"]), /--file needs a value/);
+  assert.throws(() => parseOptions(["--force=yes"]), /doesn't take a value/);
+});
+
+test("Kafka mode signs completions with a named secret that outlives the stack", () => {
+  const file = parseInletFile(kafkaFile);
+  const template = awsTemplate(file, arns(awsSecretNames(file))) as { Resources: Record<string, any> };
+  assert.equal(template.Resources.CompletionSecret, undefined, "not a stack resource, so destroy keeps it");
+  assert.match(
+    template.Resources.DeliveryFunction.Properties.Environment.Variables.INLET_COMPLETION_SECRET_REF,
+    /^aws-secrets:arn:aws:secretsmanager:.*:secret:inlet-hooks-completion-key-/,
+  );
+});
+
+test("deploy names fit AWS and Cloudflare limits", () => {
+  assert.throws(() => parseInletFile(sqsFile.replace("name: inlet-github", `name: a${"b".repeat(54)}`)), /at most 54/);
+  assert.throws(() => parseInletFile(sqsFile.replace("name: inlet-github", "name: inlet-")), /can't end with a hyphen/);
+  assert.throws(
+    () => parseInletFile(sqsFile.replace("aws-secrets:inlet-github-webhook-secret", "\"aws-secrets:\"")),
+    /set secret_ref to aws-secrets/,
+  );
 });
 
 test("deploy config checks verification secrets too, and the Lambda environment size", () => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { topicsFor } from "../core/kafka/records.js";
 import { CliError } from "./util.js";
-import type { InletFile } from "./deploy-config.js";
+import { completionSecretName, type InletFile } from "./deploy-config.js";
 
 /** The handler names inside the bundle (index.js), from src/runtimes/aws. */
 export const handlers = {
@@ -60,7 +60,9 @@ export function awsTemplate(file: InletFile, secretArns: ReadonlyMap<string, str
       Action: "secretsmanager:GetSecretValue",
       Resource: unique([
         ...routeSecretArns,
-        ...(kafka ? [requireArn(secretArns, file.deploy.kafka!.credentialsSecret), { Ref: "CompletionSecret" }] : []),
+        ...(kafka
+          ? [requireArn(secretArns, file.deploy.kafka!.credentialsSecret), requireArn(secretArns, completionSecretName(file)!)]
+          : []),
       ]),
     },
   ];
@@ -98,15 +100,8 @@ export function awsTemplate(file: InletFile, secretArns: ReadonlyMap<string, str
       INLET_KAFKA_BROKERS: settings.brokers.join(","),
       INLET_KAFKA_SASL_MECHANISM: settings.saslMechanism,
       INLET_KAFKA_SECRET_REF: `aws-secrets:${requireArn(secretArns, settings.credentialsSecret)}`,
-      INLET_COMPLETION_SECRET_REF: { "Fn::Sub": "aws-secrets:${CompletionSecret}" },
+      INLET_COMPLETION_SECRET_REF: `aws-secrets:${requireArn(secretArns, completionSecretName(file)!)}`,
     });
-    resources.CompletionSecret = {
-      Type: "AWS::SecretsManager::Secret",
-      Properties: {
-        Description: `Signs Inlet completion URLs for ${file.deploy.name}`,
-        GenerateSecretString: { PasswordLength: 48, ExcludePunctuation: true },
-      },
-    };
   } else {
     Object.assign(sharedEnv, { INLET_QUEUE_URL: { Ref: "Queue" }, INLET_DLQ_URL: { Ref: "DeadLetterQueue" } });
     resources.DeadLetterQueue = {
@@ -240,7 +235,12 @@ export function kafkaTriggerId(topic: string): string {
 
 /** The delivery consumer group for one events topic; Lambda needs one per trigger. */
 export function deliveryGroup(file: InletFile, topic: string): string {
-  return `${file.deploy.name}-delivery-${topic}`;
+  const group = `${file.deploy.name}-delivery-${topic}`;
+  // Lambda allows consumer group IDs of up to 200 characters.
+  if (group.length > 200) {
+    throw new CliError(`consumer group ${group.slice(0, 40)}... is over 200 characters; shorten deploy.name or the events topic`);
+  }
+  return group;
 }
 
 // Lambda caps a function's environment variables at 4 KB in total.

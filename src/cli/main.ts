@@ -101,6 +101,24 @@ function workDirFor(file: InletFile): string {
   return join(configDir, ".inlet", file.deploy.name);
 }
 
+const knownOptions = new Set([
+  "file",
+  "force",
+  "delete-secrets",
+  "platform",
+  "delivery",
+  "provider",
+  "name",
+  "path",
+  "destination",
+  "aquifer-url",
+  "region",
+  "kafka-brokers",
+  "kafka-sasl",
+  "kafka-secret",
+]);
+const flagOptions = new Set(["force", "delete-secrets"]);
+
 export function parseOptions(args: string[]): Options {
   const options: Options = {};
   for (let index = 0; index < args.length; index += 1) {
@@ -111,13 +129,18 @@ export function parseOptions(args: string[]): Options {
     // Split at the first = only: values such as URLs can contain more.
     const key = equals === -1 ? body : body.slice(0, equals);
     const inline = equals === -1 ? undefined : body.slice(equals + 1);
-    if (inline !== undefined) {
+    // A typo such as --fiel must not silently fall back to inlet.yml.
+    if (!knownOptions.has(key)) throw new CliError(`unknown option: --${key}`);
+    if (flagOptions.has(key)) {
+      if (inline !== undefined) throw new CliError(`--${key} doesn't take a value`);
+      options[key] = true;
+    } else if (inline !== undefined && inline.length > 0) {
       options[key] = inline;
-    } else if (index + 1 < args.length && !args[index + 1]!.startsWith("--")) {
+    } else if (inline === undefined && index + 1 < args.length && !args[index + 1]!.startsWith("--")) {
       options[key] = args[index + 1]!;
       index += 1;
     } else {
-      options[key] = true;
+      throw new CliError(`--${key} needs a value`);
     }
   }
   return options;

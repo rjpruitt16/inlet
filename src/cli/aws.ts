@@ -1,9 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Kafka, logLevel, type SASLOptions } from "kafkajs";
 import { awsTemplate, eventsTopics, functionNames, resultsTopics } from "./aws-template.js";
 import { bundleAwsHandlers } from "./bundle.js";
-import { awsSecretNames, type InletFile } from "./deploy-config.js";
+import { awsSecretNames, completionSecretName, type InletFile } from "./deploy-config.js";
 import { ask, CliError, log, run, secretValue, step } from "./util.js";
 
 export interface AwsDeployResult {
@@ -78,7 +79,8 @@ export async function destroyAws(file: InletFile, deleteSecrets: boolean): Promi
 
   if (deleteSecrets) {
     step("Deleting secrets");
-    for (const name of awsSecretNames(file)) {
+    const completion = completionSecretName(file);
+    for (const name of [...awsSecretNames(file), ...(completion ? [completion] : [])]) {
       try {
         await aws(["secretsmanager", "delete-secret", "--secret-id", name, "--force-delete-without-recovery"], region);
         log(`  ${name}`);
@@ -121,6 +123,22 @@ async function ensureSecrets(
     arns.set(name, arn);
     created.push(name);
     log(`  ${name}: created`);
+  }
+
+  const completion = completionSecretName(file);
+  if (completion) {
+    let arn = await secretArn(completion, region);
+    if (arn) {
+      log(`  ${completion}: exists`);
+    } else {
+      const key = randomBytes(32).toString("hex");
+      arn = (
+        await aws(["secretsmanager", "create-secret", "--name", completion, "--description", `Signs Inlet completion URLs for ${file.deploy.name}`, "--secret-string", "file:///dev/stdin", "--query", "ARN", "--output", "text"], region, { input: key })
+      ).trim();
+      created.push(completion);
+      log(`  ${completion}: created (generated)`);
+    }
+    arns.set(completion, arn);
   }
   return { arns, created };
 }

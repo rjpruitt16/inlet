@@ -65,6 +65,14 @@ function parseDeploy(value: unknown, config: InletConfig): DeploySettings {
       "deploy.name must start with a letter and use only letters, digits and hyphens (at most 63)",
     );
   }
+  // Lambda function names are at most 64 characters and the longest suffix
+  // is "-reconcile"; Worker names can't end with a hyphen.
+  if (raw.platform === "aws" && raw.name.length > 54) {
+    throw new ConfigurationError("deploy.name must be at most 54 characters on AWS (function names add up to 10)");
+  }
+  if (raw.name.endsWith("-")) {
+    throw new ConfigurationError("deploy.name can't end with a hyphen");
+  }
   const deploy: DeploySettings = { platform: raw.platform, name: raw.name };
   if (raw.region !== undefined) {
     if (typeof raw.region !== "string" || raw.region.length === 0) {
@@ -90,12 +98,12 @@ function parseDeploy(value: unknown, config: InletConfig): DeploySettings {
     ];
     for (const [field, ref] of refs) {
       if (ref === undefined) continue;
-      if (raw.platform === "aws" && !ref.startsWith("aws-secrets:")) {
+      if (raw.platform === "aws" && (!ref.startsWith("aws-secrets:") || ref === "aws-secrets:")) {
         throw new ConfigurationError(
           `route ${route.id}: on AWS, set ${field} to aws-secrets:<name> so inlet deploy can create and grant it`,
         );
       }
-      if (raw.platform === "cloudflare" && ref.includes(":") && !ref.startsWith("binding:")) {
+      if (raw.platform === "cloudflare" && (ref === "binding:" || (ref.includes(":") && !ref.startsWith("binding:")))) {
         throw new ConfigurationError(`route ${route.id}: on Cloudflare, ${field} is a Worker secret name`);
       }
     }
@@ -146,4 +154,13 @@ export function awsSecretNames(file: InletFile): string[] {
   }
   if (file.deploy.kafka) names.add(file.deploy.kafka.credentialsSecret);
   return Array.from(names);
+}
+
+/**
+ * The secret that signs completion URLs in Kafka mode. It lives outside the
+ * stack so destroy and redeploy keep the same key: completion webhooks
+ * Aquifer is still retrying stay valid.
+ */
+export function completionSecretName(file: InletFile): string | undefined {
+  return file.config.delivery === "kafka" ? `${file.deploy.name}-completion-key` : undefined;
 }
