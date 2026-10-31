@@ -34,11 +34,17 @@ Require evidence for every capacity claim:
 
 Use production-like payloads, network placement, machine sizes, durability settings, and provider limits. Keep headroom below the first unstable step.
 
+Run load generators and long benchmarks on always-on machines (Fly Machines or VMs), not on a laptop or a dev sandbox that sleeps without an open session. Rerun runs that die on the cloud provider's API rather than counting them. Change one variable per comparison, or say which changes a result cannot separate.
+
 ## Configure Feedback
 
 Set static Aquifer `CONFIG_PATH` values as hard ceilings. Let the backend lower the active pace at runtime with `X-Aqueduct-Rps`, `X-Aqueduct-Max-Concurrent`, and `X-Aqueduct-Max-Backlog`. Prefer `429` plus `Retry-After` or explicit pacing headers for healthy overload; reserve `5xx` for actual failures.
 
 Describe Aquifer as TCP-inspired feedback control. Verify the implementation before naming a specific control law: queued dispatch and optional inbound pacing use different increase/decrease rules, and neither should be presented as strict AIMD without code changes.
+
+Size `X-Aqueduct-Max-Backlog` in seconds of work: send `rate × seconds`, where the seconds cover at least the longest dependency outage the system should ride out. A budget sized as a small job count turns an outage into mass `429`s; in the Hatchet outage benchmark a 60-second budget at 20 rps gave small tenants a 107 s recovery p99, and a 600-second budget brought it to 5.5 s with no refusals. Don't let the budget shrink with a falling rate below the backlog Aquifer already holds.
+
+Aquifer favors unbounded retries. It holds each job and paces every attempt, so for idempotent work submit with `max_retries: -1` (`X-Aqueduct-Max-Retries: -1`); the default of 4 retries runs out within about half a minute of an outage. Callers should submit once with an `idempotent_key`, never cap attempts, and wait Aquifer's `Retry-After` after a `429` instead of stacking their own exponential backoff on top. Log `limit_reason`, `limit` and `current` from every `429` body; that is how an undersized budget shows up.
 
 Preserve Inlet's provider-derived fairness identity as Aquifer's `user_id` and enable account-queue isolation. Observe the load headers Aquifer sends to the backend and returns to callers; use them to tune capacity rather than hard-coding assumptions.
 
