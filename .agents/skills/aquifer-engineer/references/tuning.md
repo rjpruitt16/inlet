@@ -25,7 +25,7 @@ It can respond with:
 
 - `X-Aqueduct-Rps`: lower this queue's dispatch rate below its configured ceiling.
 - `X-Aqueduct-Max-Concurrent`: lower this queue's in-flight limit.
-- `X-Aqueduct-Max-Backlog`: change the upstream's shared admission budget. Size it as `rate × seconds` of work to hold, covering the longest outage to ride out.
+- `X-Aqueduct-Max-Backlog`: change the upstream's shared admission budget. Size it as `rate × seconds`: `rate` is the node's peak intake for that upstream across all tenants (not its dispatch rate), and the seconds cover the longest outage to ride out. Never lower it below the backlog already held.
 - `X-Aqueduct-Slow-Start: true`: make later new queues for the domain start at the floor and ramp.
 - `429` plus `Retry-After`: declare temporary pressure without pretending the service is broken.
 
