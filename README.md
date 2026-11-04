@@ -264,7 +264,7 @@ Limits:
 
 ## Aquifer Engineering
 
-The repository includes an [Aquifer Engineer skill](.agents/skills/aquifer-engineer/SKILL.md) for coding agents benchmarking backends, tuning Aqueduct pacing, partitioning Aquifer, configuring Valkey high availability, driving autoscaling, and designing priority tiers.
+The [Aquifer Engineer skill](https://github.com/rjpruitt16/aquifer/blob/main/skills/aquifer-engineer/SKILL.md), kept in the Aquifer repository, is for coding agents benchmarking backends, tuning Aqueduct pacing, partitioning Aquifer, configuring Valkey high availability, driving autoscaling, and designing priority tiers.
 
 ## Development
 
