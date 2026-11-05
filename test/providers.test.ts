@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 import {
   bytesToBase64,
   bytesToHex,
@@ -9,9 +10,13 @@ import {
   utf8,
 } from "../src/core/encoding.js";
 import type { WebhookRequest } from "../src/core/types.js";
+import { AlchemyProvider } from "../src/providers/alchemy.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
 import { GitHubProvider } from "../src/providers/github.js";
+import { HeliusProvider } from "../src/providers/helius.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
+import { defaultProviders } from "../src/providers/index.js";
+import { QuickNodeProvider } from "../src/providers/quicknode.js";
 import { SlackProvider } from "../src/providers/slack.js";
 import { ShopifyProvider } from "../src/providers/shopify.js";
 import { StripeProvider } from "../src/providers/stripe.js";
@@ -358,6 +363,120 @@ test("Slack verifies and answers its URL challenge without queueing it", async (
     ),
     /verification failed/,
   );
+});
+
+test("Alchemy verifies its raw-body signature and groups deliveries by webhook", async () => {
+  const text = JSON.stringify({
+    webhookId: "wh_alchemy_1",
+    id: "evt_alchemy_1",
+    type: "ADDRESS_ACTIVITY",
+    event: { network: "ETH_MAINNET", activity: [] },
+  });
+  const signature = bytesToHex(await hmacSha256(utf8("alchemy-secret"), utf8(text)));
+  const request = webhookRequest(utf8(text), { "x-alchemy-signature": signature });
+
+  const result = await new AlchemyProvider().verify(request, "alchemy-secret");
+  assert.equal(result.eventId, "evt_alchemy_1");
+  assert.equal(result.eventType, "ADDRESS_ACTIVITY");
+  assert.equal(result.defaultUserId, "wh_alchemy_1");
+  await assert.rejects(
+    () => new AlchemyProvider().verify(request, "wrong-secret"),
+    /verification failed/,
+  );
+});
+
+test("QuickNode verifies gzip Streams payloads and groups them by stream", async () => {
+  const text = JSON.stringify({
+    data: [{ blockNumber: "0x10" }],
+    metadata: {
+      stream_id: "stream-1",
+      network: "ethereum-mainnet",
+      dataset: "block",
+    },
+  });
+  const nonce = "nonce-1";
+  const timestamp = "1800000000";
+  const signature = bytesToHex(
+    await hmacSha256(utf8("quicknode-secret"), utf8(`${nonce}${timestamp}${text}`)),
+  );
+  const request = webhookRequest(Uint8Array.from(gzipSync(text)), {
+    "content-encoding": "gzip",
+    "x-qn-nonce": nonce,
+    "x-qn-signature": signature,
+    "x-qn-timestamp": timestamp,
+  });
+
+  const result = await new QuickNodeProvider().verify(request, "quicknode-secret");
+  assert.equal(result.eventId, nonce);
+  assert.equal(result.eventType, "ethereum-mainnet:block");
+  assert.equal(result.defaultUserId, "stream-1");
+  assert.equal(result.forwardedHeaders["content-encoding"], "gzip");
+  await assert.rejects(
+    () => new QuickNodeProvider().verify(request, "wrong-secret"),
+    /verification failed/,
+  );
+});
+
+test("QuickNode does not forward a stale gzip header after runtime inflation", async () => {
+  const text = JSON.stringify({ data: [], metadata: { stream_id: "stream-2" } });
+  const nonce = "nonce-2";
+  const timestamp = "1800000001";
+  const signature = bytesToHex(
+    await hmacSha256(utf8("quicknode-secret"), utf8(`${nonce}${timestamp}${text}`)),
+  );
+  const result = await new QuickNodeProvider().verify(
+    webhookRequest(utf8(text), {
+      "content-encoding": "gzip",
+      "x-qn-nonce": nonce,
+      "x-qn-signature": signature,
+      "x-qn-timestamp": timestamp,
+    }),
+    "quicknode-secret",
+  );
+
+  assert.equal(result.forwardedHeaders["content-encoding"], undefined);
+});
+
+test("Helius verifies its authorization value and groups enhanced events by fee payer", async () => {
+  const body = utf8(JSON.stringify([{
+    signature: "solana-signature-1",
+    type: "TOKEN_TRANSFER",
+    feePayer: "wallet-1",
+    tokenTransfers: [{ fromUserAccount: "wallet-1", toUserAccount: "wallet-2" }],
+  }]));
+  const request = webhookRequest(body, { authorization: "helius-secret" });
+
+  const result = await new HeliusProvider().verify(request, "helius-secret");
+  assert.equal(result.eventId, "solana-signature-1");
+  assert.equal(result.eventType, "TOKEN_TRANSFER");
+  assert.equal(result.defaultUserId, "wallet-1");
+  assert.equal(result.forwardedHeaders.authorization, undefined);
+  await assert.rejects(
+    () => new HeliusProvider().verify(request, "wrong-secret"),
+    /verification failed/,
+  );
+});
+
+test("Helius accepts raw transaction payloads", async () => {
+  const body = utf8(JSON.stringify({
+    transaction: { signatures: ["raw-signature-1"] },
+    accountData: [{ account: "wallet-raw" }],
+  }));
+  const result = await new HeliusProvider().verify(
+    webhookRequest(body, { authorization: "helius-secret" }),
+    "helius-secret",
+  );
+
+  assert.equal(result.eventId, "raw-signature-1");
+  assert.equal(result.eventType, "transaction");
+  assert.equal(result.defaultUserId, "wallet-raw");
+});
+
+test("the default provider registry includes blockchain integrations", () => {
+  const providers = defaultProviders();
+  assert.equal(providers.get("alchemy")?.name, "alchemy");
+  assert.equal(providers.get("quicknode")?.name, "quicknode");
+  assert.equal(providers.get("helius")?.name, "helius");
 });
 
 function webhookRequest(body: Uint8Array, headers: Record<string, string>): WebhookRequest {

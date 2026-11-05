@@ -19,6 +19,9 @@ const providers = new Set<ProviderName>([
   "whatsapp",
   "openai",
   "slack",
+  "alchemy",
+  "quicknode",
+  "helius",
 ]);
 
 const kafkaDefaults: KafkaConfig = {

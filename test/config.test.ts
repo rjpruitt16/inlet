@@ -35,7 +35,7 @@ routes:
   );
 });
 
-test("parseConfig accepts new providers and WhatsApp verification settings", () => {
+test("parseConfig accepts supported providers and WhatsApp verification settings", () => {
   const config = parseConfig(`
 aquifer_url: http://aquifer:8080
 routes:
@@ -66,12 +66,30 @@ routes:
     provider: slack
     secret_ref: SLACK_SIGNING_SECRET
     destination: https://backend.example/slack
+  - id: alchemy-main
+    path: /alchemy
+    provider: alchemy
+    secret_ref: ALCHEMY_SIGNING_KEY
+    destination: https://backend.example/alchemy
+  - id: quicknode-main
+    path: /quicknode
+    provider: quicknode
+    secret_ref: QUICKNODE_SECURITY_TOKEN
+    destination: https://backend.example/quicknode
+  - id: helius-main
+    path: /helius
+    provider: helius
+    secret_ref: HELIUS_AUTH_HEADER
+    destination: https://backend.example/helius
 `);
 
   assert.equal(config.routes[0]?.publicUrl, "https://hooks.example.com/twilio");
   assert.equal(config.routes[2]?.verificationSecretRef, "WHATSAPP_VERIFY_TOKEN");
   assert.equal(config.routes[3]?.provider, "openai");
   assert.equal(config.routes[4]?.provider, "slack");
+  assert.equal(config.routes[5]?.provider, "alchemy");
+  assert.equal(config.routes[6]?.provider, "quicknode");
+  assert.equal(config.routes[7]?.provider, "helius");
 });
 
 test("parseConfig requires a separate WhatsApp verification token", () => {
