@@ -515,6 +515,28 @@ test("Mailchimp verifies signed Marketing webhooks and rejects replays", async (
   );
 });
 
+test("Mailchimp rejects form keys that can traverse object prototypes", async () => {
+  const timestamp = 1_800_000_000;
+  const text = "type=subscribe&__proto__%5Binlet_polluted%5D=yes";
+  const signature = bytesToHex(
+    await hmacSha256(utf8("mailchimp-secret"), utf8(`${timestamp}.${text}`)),
+  );
+  const request = webhookRequest(utf8(text), {
+    "content-type": "application/x-www-form-urlencoded",
+    "x-mailchimp-signature": `t=${timestamp},v1=${signature}`,
+  });
+
+  await assert.rejects(
+    () => new MailchimpProvider().verify(
+      request,
+      "mailchimp-secret",
+      new Date(timestamp * 1_000),
+    ),
+    /unsafe form field/,
+  );
+  assert.equal((Object.prototype as Record<string, unknown>).inlet_polluted, undefined);
+});
+
 test("the default provider registry includes email integrations", () => {
   const providers = defaultProviders();
   assert.equal(providers.get("sendgrid")?.name, "sendgrid");

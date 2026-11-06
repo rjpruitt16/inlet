@@ -18,6 +18,7 @@ const forwardedHeaders = [
 export class KlaviyoProvider implements ProviderAdapter {
   readonly name = "klaviyo" as const;
 
+  /** Verifies Klaviyo's raw-body HMAC and validates its signed webhook identity. */
   async verify(request: WebhookRequest, secret: string): Promise<VerifiedWebhook> {
     const signature = requiredHeader(request, "klaviyo-signature");
     const timestamp = requiredHeader(request, "klaviyo-timestamp");
@@ -75,6 +76,7 @@ export class KlaviyoProvider implements ProviderAdapter {
   }
 }
 
+/** Returns a profile fairness identity only when the whole batch shares it. */
 function commonProfile(events: Record<string, unknown>[]): string | undefined {
   const profiles = events.map((event) =>
     stringAt(event, "payload", "data", "relationships", "profile", "data", "id")

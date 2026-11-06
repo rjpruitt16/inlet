@@ -120,6 +120,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** Names SendGrid's Cloudflare binding for the public key it actually contains. */
 function cloudflareSecretRef(provider: ProviderName): string {
   return provider === "sendgrid"
     ? "SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY"

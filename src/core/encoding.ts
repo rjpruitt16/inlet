@@ -62,6 +62,7 @@ export async function ecdsaP256Sha256Verify(
   );
 }
 
+/** Converts an ASN.1 DER ECDSA signature into WebCrypto's fixed-width P1363 form. */
 function ecdsaDerToP1363(signature: Uint8Array): Uint8Array {
   let offset = 0;
   if (signature[offset++] !== 0x30) throw new Error("invalid ECDSA sequence");
@@ -79,6 +80,7 @@ function ecdsaDerToP1363(signature: Uint8Array): Uint8Array {
   return result;
 }
 
+/** Reads a non-negative DER integer and normalizes it to at most 32 bytes. */
 function readDerInteger(
   bytes: Uint8Array,
   offset: number,
@@ -96,6 +98,7 @@ function readDerInteger(
   return { value: bytes.slice(start, end), next: end };
 }
 
+/** Reads the bounded DER length forms needed by a P-256 signature. */
 function readDerLength(bytes: Uint8Array, offset: number): { length: number; next: number } {
   const first = bytes[offset++];
   if (first === undefined) throw new Error("missing DER length");

@@ -17,6 +17,7 @@ const forwardedHeaders = [
 export class SendGridProvider implements ProviderAdapter {
   readonly name = "sendgrid" as const;
 
+  /** Verifies SendGrid's P-256 signature over the timestamp and exact event batch. */
   async verify(request: WebhookRequest, publicKey: string): Promise<VerifiedWebhook> {
     const timestamp = requiredHeader(request, "x-twilio-email-event-webhook-timestamp");
     const signature = requiredHeader(request, "x-twilio-email-event-webhook-signature");
@@ -70,6 +71,7 @@ export class SendGridProvider implements ProviderAdapter {
   }
 }
 
+/** Accepts SendGrid's base64 SPKI key with or without PEM framing. */
 function decodePublicKey(value: string): Uint8Array {
   const encoded = value
     .replace(/-----BEGIN PUBLIC KEY-----/g, "")
@@ -79,6 +81,7 @@ function decodePublicKey(value: string): Uint8Array {
   return base64ToBytes(encoded);
 }
 
+/** Parses SendGrid's required non-empty JSON event array. */
 function parseEvents(request: WebhookRequest): Record<string, unknown>[] {
   let body: unknown;
   try {
@@ -96,6 +99,7 @@ function parseEvents(request: WebhookRequest): Record<string, unknown>[] {
   return body as Record<string, unknown>[];
 }
 
+/** Uses provider fairness only when every event in a batch resolves identically. */
 function commonIdentity(events: Record<string, unknown>[]): string | undefined {
   const identities = events.map(eventIdentity);
   const first = identities[0];
@@ -104,6 +108,7 @@ function commonIdentity(events: Record<string, unknown>[]): string | undefined {
     : undefined;
 }
 
+/** Chooses SendGrid's most tenant-specific stable fairness identity. */
 function eventIdentity(event: Record<string, unknown>): string | undefined {
   return stringAt(event, "aqueduct_user_id")
     ?? stringAt(event, "tenant_id")

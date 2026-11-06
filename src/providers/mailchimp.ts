@@ -17,6 +17,7 @@ export class MailchimpProvider implements ProviderAdapter {
 
   constructor(private readonly toleranceSeconds = 300) {}
 
+  /** Verifies Mailchimp's timestamped HMAC before parsing its nested form body. */
   async verify(request: WebhookRequest, secret: string, now = new Date()): Promise<VerifiedWebhook> {
     const signatureHeader = requiredHeader(request, "x-mailchimp-signature");
     const { timestamp, signatures } = parseSignature(signatureHeader);
@@ -54,6 +55,7 @@ export class MailchimpProvider implements ProviderAdapter {
   }
 }
 
+/** Parses Mailchimp's comma-separated timestamp and signature versions. */
 function parseSignature(header: string): { timestamp: number; signatures: string[] } {
   let timestamp: number | undefined;
   const signatures: string[] = [];
@@ -71,13 +73,14 @@ function parseSignature(header: string): { timestamp: number; signatures: string
   return { timestamp: timestamp as number, signatures };
 }
 
+/** Parses Mailchimp bracket notation without exposing inherited object properties. */
 function parseFormBody(request: WebhookRequest): Record<string, unknown> {
   const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/x-www-form-urlencoded") {
     throw new PayloadError("Mailchimp webhooks must use application/x-www-form-urlencoded");
   }
 
-  const body: Record<string, unknown> = {};
+  const body = Object.create(null) as Record<string, unknown>;
   const params = new URLSearchParams(utf8String(request.body));
   for (const [name, value] of params) {
     setFormValue(body, name.replace(/\]/g, "").split("["), value);
@@ -85,18 +88,28 @@ function parseFormBody(request: WebhookRequest): Record<string, unknown> {
   return body;
 }
 
+/** Writes one nested form value while rejecting prototype traversal segments. */
 function setFormValue(target: Record<string, unknown>, path: string[], value: string): void {
+  if (path.some(isUnsafeFormSegment)) {
+    throw new PayloadError("Mailchimp webhook contains an unsafe form field");
+  }
+
   let current = target;
   for (const segment of path.slice(0, -1)) {
-    const existing = current[segment];
+    const existing = Object.hasOwn(current, segment) ? current[segment] : undefined;
     if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
       current = existing as Record<string, unknown>;
     } else {
-      const nested: Record<string, unknown> = {};
+      const nested = Object.create(null) as Record<string, unknown>;
       current[segment] = nested;
       current = nested;
     }
   }
   const last = path.at(-1);
   if (last !== undefined && last.length > 0) current[last] = value;
+}
+
+/** Identifies property names that can escape a nested form-data container. */
+function isUnsafeFormSegment(segment: string): boolean {
+  return segment === "__proto__" || segment === "prototype" || segment === "constructor";
 }
