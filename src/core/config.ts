@@ -19,6 +19,9 @@ const providers = new Set<ProviderName>([
   "whatsapp",
   "openai",
   "slack",
+  "sendgrid",
+  "klaviyo",
+  "mailchimp",
 ]);
 
 const kafkaDefaults: KafkaConfig = {

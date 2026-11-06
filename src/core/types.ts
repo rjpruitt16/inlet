@@ -7,7 +7,10 @@ export type ProviderName =
   | "telegram"
   | "whatsapp"
   | "openai"
-  | "slack";
+  | "slack"
+  | "sendgrid"
+  | "klaviyo"
+  | "mailchimp";
 
 export type HeadersRecord = Record<string, string>;
 

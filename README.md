@@ -14,6 +14,9 @@ Inlet is Apache-2.0 licensed.
 | Anthropic | Standard Webhooks signature | `data.id` -> `data.session_id` -> workspace ID -> organization ID |
 | OpenAI | Standard Webhooks signature | project ID -> organization ID |
 | Slack | Signed `v0` HMAC-SHA256 request | workspace/team ID -> enterprise ID |
+| SendGrid Event Webhook | ECDSA P-256/SHA-256 signature | common custom identity -> common message ID -> common recipient |
+| Klaviyo system webhooks | HMAC-SHA256 signature | common profile ID -> Klaviyo account ID |
+| Mailchimp Marketing | Timestamped HMAC-SHA256 signature | member ID -> audience/list ID -> campaign ID -> email |
 | Twilio | HMAC-SHA1 signature over the public URL and request parameters | account SID -> messaging-service SID -> service SID |
 | Telegram | Webhook secret-token header | chat ID -> sender ID -> user ID |
 | WhatsApp Cloud API | Meta HMAC-SHA256 signature | message sender -> status recipient -> contact ID -> phone-number ID -> WhatsApp Business Account ID |
@@ -35,18 +38,23 @@ flowchart LR
     ST[Stripe] --> STI[Stripe Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     AI[Anthropic and OpenAI] --> AII[AI Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     SL[Slack] --> SLI[Slack Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    EM[SendGrid, Klaviyo, Mailchimp] --> EMI[Email platform Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     CO[Communications providers<br/>Twilio, Telegram, WhatsApp] --> COI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
 
-    GHI --> AQ[Aquifer regional fleet]
-    SHI --> AQ
-    STI --> AQ
-    AII --> AQ
-    SLI --> AQ
-    COI --> AQ
+    GHI --> CA[Canalis<br/>optional fleet coordinator]
+    SHI --> CA
+    STI --> CA
+    AII --> CA
+    SLI --> CA
+    EMI --> CA
+    COI --> CA
+    CA --> AQ[Aquifer regional fleet]
     AQ --> BE[Your paced backends]
 ```
 
 On AWS, each provider stack contains an HTTP intake Lambda, an SQS FIFO queue, and a delivery Lambda. On Cloudflare, it contains a Worker and per-fairness-key Durable Objects whose alarms deliver to Aquifer.
+
+`aquifer_url` may point directly at Aquifer or at Canalis, which mirrors Aquifer's `/jobs` contract and coordinates a multi-node fleet. A single-node deployment does not need Canalis.
 
 ## Deploy With The CLI
 
@@ -146,6 +154,12 @@ Telegram's `secret_ref` must match the `secret_token` passed to `setWebhook`. Wh
 Twilio signs the exact public webhook URL. Inlet derives it from the incoming request; set `public_url` when a proxy changes the scheme, host, or path. Twilio support is intended for status callbacks and events that only require a `2xx` acknowledgment. Do not queue a Twilio webhook that must return TwiML synchronously.
 
 OpenAI uses its webhook endpoint signing secret in `secret_ref`. Slack uses the app signing secret, verifies and answers the Events API URL challenge before queueing, and supports JSON events plus form-encoded slash commands and interactions. Slack commands that need a later user-visible response should use Slack's `response_url`; Inlet only provides the immediate acknowledgment.
+
+SendGrid uses the Event Webhook verification public key from Mail Settings in `secret_ref`, not a SendGrid API key. Add an `aqueduct_user_id`, `tenant_id`, `account_id`, or `user_id` custom argument when sending mail to preserve tenant fairness; otherwise Inlet uses a common `sg_message_id` or recipient across the batch. A mixed batch falls back to the route identity. Inlet deduplicates an exact batch, but a SendGrid retry may regroup individual events, so the destination should also deduplicate each `sg_event_id`.
+
+Klaviyo support is for signed system webhooks, not unsigned flow webhook actions. Use the webhook signing secret as `secret_ref`. Inlet verifies the HMAC, requires the header and payload webhook IDs to match, and uses a common profile ID when a batch belongs to one profile. Mixed-profile batches use the Klaviyo account ID. Klaviyo restricts its Webhooks API to eligible plans and app partners.
+
+Mailchimp support is for Marketing audience webhooks, not Mailchimp Transactional/Mandrill. Enable webhook signing when creating the webhook and store its one-time signing secret in `secret_ref`. Inlet verifies the timestamped signature against the untouched form body and rejects deliveries outside the five-minute replay window.
 
 `webhook_url` is not sent to Aquifer unless a route configures `completion_url`. Inlet only needs Aquifer to own the provider event. Aquifer retains the terminal result for polling.
 
