@@ -13,6 +13,7 @@ test("Durable Object keeps FIFO head until Aquifer confirms it", async () => {
     new Response(JSON.stringify({ job_id: "job-1", status: "queued" }), { status: 201 }),
     new Response(JSON.stringify({ job_id: "job-1", status: "queued", duplicate: true }), { status: 200 }),
     new Response(JSON.stringify({ job_id: "job-2", status: "queued" }), { status: 201 }),
+    new Response(JSON.stringify({ job_id: "job-2", status: "queued", duplicate: true }), { status: 200 }),
   ];
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
@@ -40,6 +41,44 @@ test("Durable Object keeps FIFO head until Aquifer confirms it", async () => {
     await object.alarm();
     assert.equal(requests.length, 3);
     assert.equal((requests[2]?.idempotent_key as string).endsWith("event-2"), true);
+
+    await object.alarm();
+    assert.equal(requests.length, 4);
+    assert.equal(await storage.get("head"), undefined);
+    assert.equal(await storage.get("tail"), undefined);
+    assert.equal(storage.values.size, 0, "a drained fairness queue should leave no stored state");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Durable Object cleanup preserves an enqueue that arrives during confirmation", async () => {
+  const storage = new MemoryStorage();
+  const originalFetch = globalThis.fetch;
+  let object!: InletQueueObject;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests += 1;
+    if (requests === 1) {
+      return new Response(JSON.stringify({ job_id: "job-1", status: "queued" }), { status: 201 });
+    }
+    await enqueue(object, envelope("event-2"), "dedup-2");
+    return new Response(
+      JSON.stringify({ job_id: "job-1", status: "queued", duplicate: true }),
+      { status: 200 },
+    );
+  };
+
+  try {
+    object = new InletQueueObject({ storage }, env());
+    await enqueue(object, envelope("event-1"), "dedup-1");
+    await object.alarm();
+    await object.alarm();
+
+    assert.equal(await storage.get("head"), 2);
+    assert.equal(await storage.get("tail"), 2);
+    assert.ok(await storage.get("message:00000000000000000002"));
+    assert.ok(storage.alarm !== null);
   } finally {
     globalThis.fetch = originalFetch;
   }

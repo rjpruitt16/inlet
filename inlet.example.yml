@@ -45,6 +45,24 @@ routes:
     secret_ref: SLACK_SIGNING_SECRET
     destination: https://backend.example.com/webhooks/slack
 
+  - id: sendgrid-events
+    path: /webhooks/sendgrid/events
+    provider: sendgrid
+    secret_ref: SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY
+    destination: https://backend.example.com/webhooks/sendgrid
+
+  - id: klaviyo-events
+    path: /webhooks/klaviyo/events
+    provider: klaviyo
+    secret_ref: KLAVIYO_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/klaviyo
+
+  - id: mailchimp-audience
+    path: /webhooks/mailchimp/audience
+    provider: mailchimp
+    secret_ref: MAILCHIMP_WEBHOOK_SECRET
+    destination: https://backend.example.com/webhooks/mailchimp
+
   - id: twilio-status
     path: /webhooks/twilio/status
     provider: twilio

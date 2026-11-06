@@ -7,7 +7,7 @@ import path from "node:path";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const out = path.resolve(here, "../../dist/canalis");
-const plugins = ["shopify", "github", "stripe", "anthropic"];
+const plugins = ["shopify", "github", "stripe", "anthropic", "klaviyo", "mailchimp"];
 mkdirSync(out, { recursive: true });
 
 for (const name of plugins) {
