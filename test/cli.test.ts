@@ -6,7 +6,7 @@ import test from "node:test";
 import { awsTemplate, deliveryGroup, eventsTopics, functionNames, kafkaTriggerId } from "../src/cli/aws-template.js";
 import { deadLetterQueue, workerSecretNames, wranglerConfig } from "../src/cli/cloudflare.js";
 import { awsSecretNames, parseInletFile } from "../src/cli/deploy-config.js";
-import { init } from "../src/cli/init.js";
+import { init, providers } from "../src/cli/init.js";
 import { parseOptions } from "../src/cli/main.js";
 
 const sqsFile = `
@@ -50,6 +50,12 @@ const arns = (names: string[]) =>
   arnMap([...names, "inlet-hooks-completion-key"]);
 const arnMap = (names: string[]) =>
   new Map(names.map((name) => [name, `arn:aws:secretsmanager:us-east-2:123456789012:secret:${name}-AbCdEf`]));
+
+test("init offers the email webhook providers", () => {
+  assert.ok(providers.includes("sendgrid"));
+  assert.ok(providers.includes("klaviyo"));
+  assert.ok(providers.includes("mailchimp"));
+});
 
 test("the deploy block is read and kept out of INLET_CONFIG", () => {
   const file = parseInletFile(sqsFile);
@@ -224,4 +230,20 @@ test("init with every option writes a file deploy can read", async () => {
     websocketExport: false,
   });
   await assert.rejects(init({ file: path }), /already exists/);
+});
+
+test("init names the SendGrid Cloudflare binding as a public key", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "inlet-sendgrid-init-"));
+  const path = join(dir, "inlet.yml");
+  await init({
+    file: path,
+    platform: "cloudflare",
+    provider: "sendgrid",
+    name: "inlet-sendgrid",
+    path: "/webhooks/sendgrid/main",
+    destination: "https://backend.example.com/sendgrid",
+    "aquifer-url": "https://aquifer.example.com",
+  });
+  const file = parseInletFile(await readFile(path, "utf8"));
+  assert.equal(file.config.routes[0]?.secretRef, "SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY");
 });

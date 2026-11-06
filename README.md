@@ -25,7 +25,7 @@ If none of a provider's keys is present, Inlet uses `route:<route-id>`. Any rout
 
 ## Canalis plugins
 
-Running [Canalis](https://github.com/rjpruitt16/canalis-rs) already? Inlet's providers also build into Canalis webhook plugins (`plugins/canalis`, `npm run build:canalis-plugins`), so Canalis can verify webhooks itself with no Lambda. They're built from the same provider code, so both verify webhooks identically. Shopify is available today.
+Running [Canalis](https://github.com/rjpruitt16/canalis-rs) already? Inlet's providers also build into Canalis webhook plugins (`plugins/canalis`, `npm run build:canalis-plugins`), so Canalis can verify webhooks itself with no Lambda. They're built from the same provider code, so both verify webhooks identically. Shopify, GitHub, Stripe, Anthropic, Klaviyo, and Mailchimp are available as plugins today. SendGrid's P-256 signature is currently verified by Inlet before delivery to Canalis.
 
 ## Recommended Topology
 

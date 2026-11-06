@@ -11,6 +11,9 @@ export const providers: readonly ProviderName[] = [
   "anthropic",
   "openai",
   "slack",
+  "sendgrid",
+  "klaviyo",
+  "mailchimp",
   "twilio",
   "telegram",
   "whatsapp",
@@ -40,7 +43,7 @@ export async function init(options: Options): Promise<void> {
     id: `${provider}-main`,
     path: routePath,
     provider,
-    secret_ref: platform === "aws" ? `aws-secrets:${name}-webhook-secret` : `${provider.toUpperCase()}_WEBHOOK_SECRET`,
+    secret_ref: platform === "aws" ? `aws-secrets:${name}-webhook-secret` : cloudflareSecretRef(provider),
     destination,
   };
   if (provider === "whatsapp") {
@@ -115,4 +118,10 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function cloudflareSecretRef(provider: ProviderName): string {
+  return provider === "sendgrid"
+    ? "SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY"
+    : `${provider.toUpperCase()}_WEBHOOK_SECRET`;
 }
