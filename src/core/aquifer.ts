@@ -1,6 +1,12 @@
 import { base64ToBytes, utf8String } from "./encoding.js";
 import type { AquiferResponse, AquiferTransport, DeliveryEnvelope, HeadersRecord } from "./types.js";
 
+export function defaultIdempotencyKey(
+  envelope: Pick<DeliveryEnvelope, "provider" | "routeId" | "eventId">,
+): string {
+  return `inlet:${envelope.provider}:${envelope.routeId}:${envelope.eventId}`;
+}
+
 export interface FetchAquiferOptions {
   timeoutMs?: number;
   fetch?: typeof fetch;
@@ -22,7 +28,7 @@ export class FetchAquiferTransport implements AquiferTransport {
   async submit(envelope: DeliveryEnvelope): Promise<AquiferResponse> {
     const body: Record<string, unknown> = {
       user_id: envelope.userId,
-      idempotent_key: `inlet:${envelope.provider}:${envelope.routeId}:${envelope.eventId}`,
+      idempotent_key: envelope.idempotencyKey ?? defaultIdempotencyKey(envelope),
       url: envelope.destination,
       method: "POST",
       headers: envelope.headers,

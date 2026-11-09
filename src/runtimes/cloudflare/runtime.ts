@@ -136,7 +136,7 @@ export class InletQueueObject {
 
     const delivery = await this.state.storage.get<StoredDelivery>(messageKey(head));
     if (!delivery) {
-      await this.advance(head, tail);
+      await this.advance(head);
       return;
     }
 
@@ -188,15 +188,26 @@ export class InletQueueObject {
 
     await this.state.storage.delete(`dedup:${delivery.deduplicationId}`);
     await this.state.storage.delete(messageKey(head));
-    await this.advance(head, tail);
+    await this.advance(head);
   }
 
-  private async advance(head: number, tail: number): Promise<void> {
-    const next = head + 1;
-    if (next <= tail) {
-      await this.state.storage.setAlarm(Date.now());
-    }
-    await this.state.storage.put(headKey, next);
+  /** Advances atomically, clearing metadata only when no enqueue extended the queue. */
+  private async advance(completedHead: number): Promise<void> {
+    await this.state.storage.transaction(async (storage) => {
+      const head = await storage.get<number>(headKey);
+      const tail = await storage.get<number>(tailKey);
+      if (head !== completedHead || tail === undefined) return;
+
+      const next = completedHead + 1;
+      if (next <= tail) {
+        await storage.put(headKey, next);
+        await storage.setAlarm(Date.now());
+        return;
+      }
+
+      await storage.delete(headKey);
+      await storage.delete(tailKey);
+    });
   }
 }
 

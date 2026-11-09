@@ -14,11 +14,18 @@ Inlet is Apache-2.0 licensed.
 | Anthropic | Standard Webhooks signature | `data.id` -> `data.session_id` -> workspace ID -> organization ID |
 | OpenAI | Standard Webhooks signature | project ID -> organization ID |
 | Slack | Signed `v0` HMAC-SHA256 request | workspace/team ID -> enterprise ID |
+| SendGrid Event Webhook | ECDSA P-256/SHA-256 signature | common custom identity -> common message ID -> common recipient |
+| Klaviyo system webhooks | HMAC-SHA256 signature | common profile ID -> Klaviyo account ID |
+| Mailchimp Marketing | Timestamped HMAC-SHA256 signature | member ID -> audience/list ID -> campaign ID -> email |
 | Twilio | HMAC-SHA1 signature over the public URL and request parameters | account SID -> messaging-service SID -> service SID |
 | Telegram | Webhook secret-token header | chat ID -> sender ID -> user ID |
 | WhatsApp Cloud API | Meta HMAC-SHA256 signature | message sender -> status recipient -> contact ID -> phone-number ID -> WhatsApp Business Account ID |
 
 If none of a provider's keys is present, Inlet uses `route:<route-id>`. Any route can replace these defaults with an explicit `fairness_key`.
+
+## Canalis plugins
+
+Running [Canalis](https://github.com/rjpruitt16/canalis-rs) already? Inlet's providers also build into Canalis webhook plugins (`plugins/canalis`, `npm run build:canalis-plugins`), so Canalis can verify webhooks itself with no Lambda. They're built from the same provider code, so both verify webhooks identically. Shopify, GitHub, Stripe, Anthropic, Klaviyo, and Mailchimp are available as plugins today. SendGrid's P-256 signature is currently verified by Inlet before delivery to Canalis.
 
 ## Recommended Topology
 
@@ -31,18 +38,71 @@ flowchart LR
     ST[Stripe] --> STI[Stripe Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     AI[Anthropic and OpenAI] --> AII[AI Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     SL[Slack] --> SLI[Slack Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    EM[SendGrid, Klaviyo, Mailchimp] --> EMI[Email platform Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     CO[Communications providers<br/>Twilio, Telegram, WhatsApp] --> COI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
 
-    GHI --> AQ[Aquifer regional fleet]
-    SHI --> AQ
-    STI --> AQ
-    AII --> AQ
-    SLI --> AQ
-    COI --> AQ
+    GHI --> CA[Canalis<br/>optional fleet coordinator]
+    SHI --> CA
+    STI --> CA
+    AII --> CA
+    SLI --> CA
+    EMI --> CA
+    COI --> CA
+    CA --> AQ[Aquifer regional fleet]
     AQ --> BE[Your paced backends]
 ```
 
 On AWS, each provider stack contains an HTTP intake Lambda, an SQS FIFO queue, and a delivery Lambda. On Cloudflare, it contains a Worker and per-fairness-key Durable Objects whose alarms deliver to Aquifer.
+
+`aquifer_url` may point directly at Aquifer or at Canalis, which mirrors Aquifer's `/jobs` contract and coordinates a multi-node fleet. A single-node deployment does not need Canalis.
+
+## Deploy With The CLI
+
+Two commands set up a complete deployment from one `inlet.yml`:
+
+```bash
+npx @aqueduct/inlet init      # answer a few questions; writes inlet.yml
+npx @aqueduct/inlet deploy    # creates or updates everything, prints your webhook URL
+```
+
+`init` asks where Inlet runs (AWS or Cloudflare), the delivery mode on AWS (SQS, or your own Kafka), the provider, your backend URL and Aquifer's URL. Every question also has a flag, such as `--platform aws --delivery kafka --provider github`, for scripts. `npx @aqueduct/inlet help` lists them.
+
+`deploy` reads `inlet.yml` and creates what that setup needs:
+
+| Setup | What deploy creates |
+|---|---|
+| AWS + SQS | Intake and delivery Lambdas, an HTTP API, FIFO queue and dead-letter queue, IAM role, log groups |
+| AWS + Kafka | Intake, delivery and reconciler Lambdas, an HTTP API, a Kafka trigger per events topic, the 5-minute reconcile schedule, a generated completion signing key (`<name>-completion-key`), and any missing topics |
+| Cloudflare | The Worker with its ordered-queue Durable Object, and the dead-letter queue |
+
+- On AWS it bundles the code itself, so it needs only the AWS CLI with working credentials: no Docker, SAM or S3 bucket.
+- On Cloudflare it uses Wrangler and your `wrangler login`.
+- Secrets that don't exist yet (provider signing secrets, Kafka credentials) are asked for once and stored in Secrets Manager or as Worker secrets. Without a terminal, it reads them from `INLET_SECRET_<NAME>` (and `INLET_KAFKA_USERNAME`).
+- Running `deploy` again updates the deployment in place.
+- It never creates a Kafka cluster: you bring the brokers, reachable over TLS.
+
+`npx @aqueduct/inlet destroy` deletes the deployment:
+
+- On AWS it deletes the stack, including its log groups. Secrets Manager secrets, including the completion signing key, are kept unless you pass `--delete-secrets`, so a redeploy picks up where it left off.
+- On Cloudflare it deletes the Worker, which also removes its secrets and Durable Object data, and the dead-letter queue.
+- Kafka topics are always kept, since they hold your event history.
+
+Everything in `inlet.yml` except the `deploy:` block is the runtime configuration below:
+
+```yaml
+deploy:
+  platform: aws              # aws | cloudflare
+  name: inlet-github         # stack or Worker name
+  region: us-east-2          # aws only
+  kafka:                     # delivery: kafka only
+    brokers: broker-1.example.com:9093
+    sasl_mechanism: scram-sha-512
+    credentials_secret: inlet-github-kafka
+    partitions: 6
+    websocket_export: false  # true: accept Aquifer's WebSocket transcript export
+```
+
+The SAM templates in [`examples/aws`](examples/aws) and the Wrangler config in [`examples/cloudflare`](examples/cloudflare) remain for teams that manage their own infrastructure as code.
 
 ## Delivery
 
@@ -95,6 +155,12 @@ Twilio signs the exact public webhook URL. Inlet derives it from the incoming re
 
 OpenAI uses its webhook endpoint signing secret in `secret_ref`. Slack uses the app signing secret, verifies and answers the Events API URL challenge before queueing, and supports JSON events plus form-encoded slash commands and interactions. Slack commands that need a later user-visible response should use Slack's `response_url`; Inlet only provides the immediate acknowledgment.
 
+SendGrid uses the Event Webhook verification public key from Mail Settings in `secret_ref`, not a SendGrid API key. Add an `aqueduct_user_id`, `tenant_id`, `account_id`, or `user_id` custom argument when sending mail to preserve tenant fairness; otherwise Inlet uses a common `sg_message_id` or recipient across the batch. A mixed batch falls back to the route identity. Inlet deduplicates an exact batch, but a SendGrid retry may regroup individual events, so the destination should also deduplicate each `sg_event_id`.
+
+Klaviyo support is for signed system webhooks, not unsigned flow webhook actions. Use the webhook signing secret as `secret_ref`. Inlet verifies the HMAC, requires the header and payload webhook IDs to match, and uses a common profile ID when a batch belongs to one profile. Mixed-profile batches use the Klaviyo account ID. Klaviyo restricts its Webhooks API to eligible plans and app partners.
+
+Mailchimp support is for Marketing audience webhooks, not Mailchimp Transactional/Mandrill. Enable webhook signing when creating the webhook and store its one-time signing secret in `secret_ref`. Inlet verifies the timestamped signature against the untouched form body and rejects deliveries outside the five-minute replay window.
+
 `webhook_url` is not sent to Aquifer unless a route configures `completion_url`. Inlet only needs Aquifer to own the provider event. Aquifer retains the terminal result for polling.
 
 ## AWS
@@ -125,9 +191,94 @@ Provider secrets are Worker secret bindings named by each route's `secret_ref`. 
 
 See [the Cloudflare deployment guide](examples/cloudflare/README.md) and its provider-specific [`wrangler.jsonc`](examples/cloudflare/wrangler.jsonc) example. The [Cloudflare Worker and private Fly.io Aquifer quick start](examples/cloudflare-fly/README.md) adds the `INLET_AQUIFER` VPC binding and deploys the private cross-cloud path.
 
+## Kafka Delivery
+
+Set `delivery: kafka` to use your own Kafka instead of SQS FIFO: Confluent, Redpanda, MSK or self-hosted. Each deployment uses one mode. SQS stays the default and works exactly as before, with no reconciliation.
+
+Kafka mode adds a durable history of every webhook and every outcome, and a reconciler that redrives events that never finished, for example because an Aquifer machine disappeared with accepted jobs.
+
+```yaml
+aquifer_url: https://aquifer.internal.example
+delivery: kafka
+kafka:
+  events_topic: inlet.events       # default
+  results_topic: inlet.results     # default
+  websocket_topic: inlet.websocket # default: where exported WebSocket transcripts go
+  reconcile:
+    after_seconds: 1800            # default: an event with no result after 30 minutes is overdue
+    search_window_seconds: 3600    # default: how far past an event to look for its result
+    max_redrives: 3                # default
+routes:
+  - id: github-main
+    path: /webhooks/github/main
+    provider: github
+    secret_ref: aws-secrets:github-webhook-secret
+    destination: https://backend.example.com/webhooks/github
+    events_topic: github.events    # optional, per route
+    results_topic: github.results  # optional, per route
+```
+
+How it works:
+
+1. The intake verifies the webhook and writes an `inlet.event.v1` record to the route's events topic before answering the provider. The Kafka key is the route and fairness identity, so one user's events share a partition and stay in order.
+2. Lambda's Kafka trigger delivers batches to the dispatcher. It submits each user's events to Aquifer in order, then confirms the whole batch with one wait, using the same two-observation check as SQS. It writes `owned` when Aquifer confirms it holds the job.
+3. Aquifer's completion webhook comes back to Inlet at a signed `/_inlet/completions` URL, and Inlet writes `completed` or `failed`. Aquifer and Spillway need no Kafka support.
+4. Every 5 minutes the reconciler reads the events topic from its own cursor (a consumer group's committed offsets) and stops at the first event that isn't overdue yet. For each overdue event it looks for a result in the results topic within `search_window_seconds`:
+   - `completed` or `dead_letter`: done.
+   - `failed`: redriven with a new Aquifer idempotency key, so Aquifer runs it again.
+   - No terminal result: redriven with the same key. If Aquifer still has the job it answers duplicate; if the job was lost it creates it again.
+   - After `max_redrives`, it writes `gave_up`.
+
+   A redrive is written to the events topic before it's recorded as `redriven`, and the cursor moves only after both, so a crash leaves at most a duplicate, which Aquifer deduplicates.
+
+### Records
+
+Events (`inlet.event.v1`): `delivery_id` (stable across redrives), `partition_key`, `event_id`, `event_type`, `provider`, `route_id`, `user_id`, `destination`, `method`, `content_type`, `headers`, `body_base64`, `received_at`, `written_at`, `reconcile_after`, `redrive`, `key_generation`, `idempotency_key`, `events_topic`, `results_topic`, and when present `max_retries`, `execute_before`, `traceparent`.
+
+Results (`inlet.result.v1`), keyed by `delivery_id`: `status` is one of `owned`, `completed`, `failed`, `dead_letter`, `redriven`, `gave_up`, plus `job_id`, `response_status`, `reason`, `redrive`, `key_generation`, `source` (`dispatch`, `completion` or `reconciler`) and `recorded_at`. The destination's response body isn't stored.
+
+### What "completed" means
+
+- `owned`: Aquifer confirmed it holds the job.
+- `completed`: the destination answered Aquifer with 2xx.
+- Whether your backend finished its own asynchronous work afterwards is outside what Inlet can see.
+
+Delivery is at least once. Every request carries `x-inlet-event-id` and `x-inlet-delivery-id`, so your backend can drop repeats. Exactly-once side effects need your backend to deduplicate on them.
+
+### Settings
+
+| Variable | Purpose |
+|---|---|
+| `INLET_KAFKA_BROKERS` | Comma-separated bootstrap servers |
+| `INLET_KAFKA_SASL_MECHANISM` | `scram-sha-512`, `scram-sha-256` or `plain`; unset for no SASL |
+| `INLET_KAFKA_SECRET_REF` | Secret with `{"username","password"}`, the same format Lambda's Kafka trigger reads |
+| `INLET_KAFKA_SSL` | `false` to turn TLS off (default on) |
+| `INLET_COMPLETION_SECRET_REF` | Key that signs completion URLs |
+| `INLET_PUBLIC_URL` | Inlet's public base URL, for completion URLs (dispatcher only) |
+| `INLET_KAFKA_RECONCILER_GROUP` | Consumer group that holds the reconciler's cursor (default `inlet-reconciler`) |
+| `INLET_WS_EXPORT_TOKEN_REF` | Bearer token Aquifer's WebSocket export must send; turns on `/_inlet/websocket-events` |
+| `INLET_KAFKA_MAX_RECORD_BYTES` | Largest WebSocket record to write (default 1,000,000, Kafka's default message size); a batch with a larger one gets 413 |
+
+### WebSocket transcripts
+
+Aquifer keeps each WebSocket session's transcript in Valkey for a replay window (24 hours by default). To keep every message for longer, for audit or for replaying a session days later, turn on Aquifer's transcript export (`AQUIFER_WS_EXPORT_*`) and point it at Inlet's `/_inlet/websocket-events`.
+
+Inlet writes each message to `kafka.websocket_topic` as an `inlet.websocket.v1` record, keyed by `session_id` so a session's messages stay in order. The fields are `session_id`, `stream_id` (the transcript cursor), `direction`, `type`, `message_id`, `caused_by`, `generation`, `payload`, `recorded_at` and `node_id`. Delivery is at least once, so drop repeats by `session_id` + `stream_id`.
+
+With the CLI, set `websocket_export: true` under `deploy.kafka`. `inlet deploy` then creates the topic and a generated token, and prints the exact Aquifer settings to use.
+
+[`examples/aws/template.kafka.yaml`](examples/aws/template.kafka.yaml) deploys the intake, dispatcher (`kafkaHandler`) and reconciler (`reconcileHandler`) against your Kafka. Create the topics first. The template's functions run outside a VPC, so the brokers must be reachable from the internet over TLS; its comments show what to add for brokers inside a VPC. It uses SASL/SCRAM-SHA-512; for SASL/PLAIN (Confluent Cloud) change the two lines its comments point to.
+
+Limits:
+
+- A Kafka partition holds many users. While one user's event is retried, other users' events in the same partition wait behind it. More partitions make that rarer.
+- Records are limited by your topic's maximum message size (1 MB by default).
+- `completion_url` can't be combined with Kafka mode, because Inlet receives completions itself.
+- Kafka mode runs on AWS today. Cloudflare support is planned.
+
 ## Aquifer Engineering
 
-The repository includes an [Aquifer Engineer skill](.agents/skills/aquifer-engineer/SKILL.md) for coding agents benchmarking backends, tuning Aqueduct pacing, partitioning Aquifer, configuring Valkey high availability, driving autoscaling, and designing priority tiers.
+The [Aquifer Engineer skill](https://github.com/rjpruitt16/aquifer/blob/main/skills/aquifer-engineer/SKILL.md), kept in the Aquifer repository, is for coding agents benchmarking backends, tuning Aqueduct pacing, partitioning Aquifer, configuring Valkey high availability, driving autoscaling, and designing priority tiers.
 
 ## Development
 

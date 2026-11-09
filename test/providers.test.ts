@@ -11,7 +11,11 @@ import {
 import type { WebhookRequest } from "../src/core/types.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
 import { GitHubProvider } from "../src/providers/github.js";
+import { defaultProviders } from "../src/providers/index.js";
+import { KlaviyoProvider } from "../src/providers/klaviyo.js";
+import { MailchimpProvider } from "../src/providers/mailchimp.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
+import { SendGridProvider } from "../src/providers/sendgrid.js";
 import { SlackProvider } from "../src/providers/slack.js";
 import { ShopifyProvider } from "../src/providers/shopify.js";
 import { StripeProvider } from "../src/providers/stripe.js";
@@ -358,6 +362,186 @@ test("Slack verifies and answers its URL challenge without queueing it", async (
     ),
     /verification failed/,
   );
+});
+
+test("SendGrid verifies its official signed Event Webhook fixture", async () => {
+  const publicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE83T4O/n84iotIvIW4mdBgQ/7dAfSmpqIM8kF9mN1flpVKS3GRqe62gw+2fNNRaINXvVpiglSI8eNEc6wEA3F+g==";
+  const signature = "MEUCIGHQVtGj+Y3LkG9fLcxf3qfI10QysgDWmMOVmxG0u6ZUAiEAyBiXDWzM+uOe5W0JuG+luQAbPIqHh89M15TluLtEZtM=";
+  const timestamp = "1600112502";
+  const text = JSON.stringify([{
+    email: "hello@world.com",
+    event: "dropped",
+    reason: "Bounced Address",
+    sg_event_id: "ZHJvcC0xMDk5NDkxOS1MUnpYbF9OSFN0T0doUTRrb2ZTbV9BLTA",
+    sg_message_id: "LRzXl_NHStOGhQ4kofSm_A.filterdrecv-p3mdw1-756b745b58-kmzbl-18-5F5FC76C-9.0",
+    "smtp-id": "<LRzXl_NHStOGhQ4kofSm_A@ismtpd0039p1iad1.sendgrid.net>",
+    timestamp: 1600112492,
+  }]) + "\r\n";
+  const request = webhookRequest(utf8(text), {
+    "content-type": "application/json",
+    "x-twilio-email-event-webhook-signature": signature,
+    "x-twilio-email-event-webhook-timestamp": timestamp,
+  });
+
+  const result = await new SendGridProvider().verify(request, publicKey);
+  assert.equal(result.eventId, "ZHJvcC0xMDk5NDkxOS1MUnpYbF9OSFN0T0doUTRrb2ZTbV9BLTA");
+  assert.equal(result.eventType, "dropped");
+  assert.equal(
+    result.defaultUserId,
+    "LRzXl_NHStOGhQ4kofSm_A.filterdrecv-p3mdw1-756b745b58-kmzbl-18-5F5FC76C-9.0",
+  );
+  assert.equal(result.forwardedHeaders["x-twilio-email-event-webhook-signature"], signature);
+
+  const tampered = webhookRequest(utf8(text.replace("dropped", "delivered")), request.headers);
+  await assert.rejects(
+    () => new SendGridProvider().verify(tampered, publicKey),
+    /verification failed/,
+  );
+});
+
+test("SendGrid gives a signed multi-event delivery a deterministic batch identity", async () => {
+  const publicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEQ4LIFtWztlsF7skFqOncjD1lun4H5w8XOhyOArHW9RcIx/FfEzx6cikC/yPfUvwaX/JScE7Fc9CJD2afQ9Ok3Q==";
+  const signature = "MEYCIQC/I4o6vCgqRYrTljjoVWB/GRWNtxeePlLMHr3x9ETeRQIhAIpV+03nREPTTHWSW0wIOA0EoMPdcNgXa70yCaqDJlu5";
+  const timestamp = "1619651159";
+  const messageId = "qNwBLgPQQjW6DJvKQwSAbw.filterdrecv-canary-547b64655b-cw6zx-1-6089EA4A-56.0";
+  const events = [
+    {
+      email: "invalid@gmail.com",
+      event: "processed",
+      send_at: 0,
+      sg_event_id: "cHJvY2Vzc2VkLTE5OTQyMTEyLXFOd0JMZ1BRUWpXNkRKdktRd1NBYnctMA",
+      sg_message_id: messageId,
+      "smtp-id": "<qNwBLgPQQjW6DJvKQwSAbw@ismtpd0178p1mdw1.sendgrid.net>",
+      timestamp: 1619651146,
+    },
+    {
+      email: "invalid@gmail.com",
+      event: "bounce",
+      ip: "167.89.101.76",
+      reason: "552 5.2.2 The email account that you tried to reach is over quota and inactive. Please direct the recipient to https://support.google.com/mail/?p=OverQuotaPerm c17si1130468pgv.34 - gsmtp",
+      sg_event_id: "Ym91bmNlLTAtMTk5NDIxMTItcU53QkxnUFFRalc2REp2S1F3U0Fidy0w",
+      sg_message_id: messageId,
+      "smtp-id": "<qNwBLgPQQjW6DJvKQwSAbw@ismtpd0178p1mdw1.sendgrid.net>",
+      status: "5.2.2",
+      timestamp: 1619651147,
+      tls: 1,
+      type: "blocked",
+    },
+  ];
+  const text = JSON.stringify(events).split("},{").join("},\r\n{") + "\r\n";
+  const request = webhookRequest(utf8(text), {
+    "x-twilio-email-event-webhook-signature": signature,
+    "x-twilio-email-event-webhook-timestamp": timestamp,
+  });
+
+  const result = await new SendGridProvider().verify(request, publicKey);
+  assert.match(result.eventId, /^batch-[a-f0-9]{64}$/);
+  assert.equal(result.eventType, "batch");
+  assert.equal(result.defaultUserId, messageId);
+});
+
+test("Klaviyo verifies signed batches and groups a common profile", async () => {
+  const timestamp = "Thu, 04 Jan 2024 18:05:25 GMT";
+  const webhookId = "webhook-1";
+  const body = {
+    data: [
+      {
+        external_id: "event-1",
+        topic: "event:klaviyo.received_email",
+        payload: { data: { relationships: { profile: { data: { id: "profile-1" } } } } },
+      },
+      {
+        external_id: "event-2",
+        topic: "event:klaviyo.opened_email",
+        payload: { data: { relationships: { profile: { data: { id: "profile-1" } } } } },
+      },
+    ],
+    meta: {
+      klaviyo_account_id: "account-1",
+      klaviyo_webhook_id: webhookId,
+      timestamp: "2024-01-04T18:05:25Z",
+    },
+  };
+  const text = JSON.stringify(body);
+  const signed = utf8(`${text}${timestamp}`);
+  const signature = bytesToHex(await hmacSha256(utf8("klaviyo-secret"), signed));
+  const request = webhookRequest(utf8(text), {
+    "klaviyo-signature": signature,
+    "klaviyo-timestamp": timestamp,
+    "klaviyo-webhook-id": webhookId,
+  });
+
+  const result = await new KlaviyoProvider().verify(request, "klaviyo-secret");
+  assert.match(result.eventId, /^batch-[a-f0-9]{64}$/);
+  assert.equal(result.eventType, "batch");
+  assert.equal(result.defaultUserId, "profile-1");
+
+  await assert.rejects(
+    () => new KlaviyoProvider().verify(
+      webhookRequest(request.body, { ...request.headers, "klaviyo-webhook-id": "wrong" }),
+      "klaviyo-secret",
+    ),
+    /webhook ID does not match/,
+  );
+});
+
+test("Mailchimp verifies signed Marketing webhooks and rejects replays", async () => {
+  const timestamp = 1_800_000_000;
+  const text = "type=subscribe&fired_at=2027-01-15+08%3A00%3A00&data%5Bid%5D=member-1&data%5Blist_id%5D=list-1&data%5Bemail%5D=user%40example.com";
+  const signature = bytesToHex(
+    await hmacSha256(utf8("mailchimp-secret"), utf8(`${timestamp}.${text}`)),
+  );
+  const request = webhookRequest(utf8(text), {
+    "content-type": "application/x-www-form-urlencoded",
+    "x-mailchimp-signature": `t=${timestamp},v1=${signature}`,
+  });
+
+  const result = await new MailchimpProvider().verify(
+    request,
+    "mailchimp-secret",
+    new Date(timestamp * 1_000),
+  );
+  assert.match(result.eventId, /^body-[a-f0-9]{64}$/);
+  assert.equal(result.eventType, "subscribe");
+  assert.equal(result.defaultUserId, "member-1");
+
+  await assert.rejects(
+    () => new MailchimpProvider().verify(
+      request,
+      "mailchimp-secret",
+      new Date((timestamp + 301) * 1_000),
+    ),
+    /outside the tolerance/,
+  );
+});
+
+test("Mailchimp rejects form keys that can traverse object prototypes", async () => {
+  const timestamp = 1_800_000_000;
+  const text = "type=subscribe&__proto__%5Binlet_polluted%5D=yes";
+  const signature = bytesToHex(
+    await hmacSha256(utf8("mailchimp-secret"), utf8(`${timestamp}.${text}`)),
+  );
+  const request = webhookRequest(utf8(text), {
+    "content-type": "application/x-www-form-urlencoded",
+    "x-mailchimp-signature": `t=${timestamp},v1=${signature}`,
+  });
+
+  await assert.rejects(
+    () => new MailchimpProvider().verify(
+      request,
+      "mailchimp-secret",
+      new Date(timestamp * 1_000),
+    ),
+    /unsafe form field/,
+  );
+  assert.equal((Object.prototype as Record<string, unknown>).inlet_polluted, undefined);
+});
+
+test("the default provider registry includes email integrations", () => {
+  const providers = defaultProviders();
+  assert.equal(providers.get("sendgrid")?.name, "sendgrid");
+  assert.equal(providers.get("klaviyo")?.name, "klaviyo");
+  assert.equal(providers.get("mailchimp")?.name, "mailchimp");
 });
 
 function webhookRequest(body: Uint8Array, headers: Record<string, string>): WebhookRequest {

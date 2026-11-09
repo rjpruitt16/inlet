@@ -5,3 +5,4 @@ dist/
 .wrangler/
 .aws-sam/
 .inlet-quickstart/
+.inlet/

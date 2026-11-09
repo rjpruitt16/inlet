@@ -1,7 +1,10 @@
 import type { ProviderAdapter, ProviderName } from "../core/types.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { GitHubProvider } from "./github.js";
+import { KlaviyoProvider } from "./klaviyo.js";
+import { MailchimpProvider } from "./mailchimp.js";
 import { OpenAIProvider } from "./openai.js";
+import { SendGridProvider } from "./sendgrid.js";
 import { SlackProvider } from "./slack.js";
 import { ShopifyProvider } from "./shopify.js";
 import { StripeProvider } from "./stripe.js";
@@ -20,6 +23,9 @@ export function defaultProviders(): ReadonlyMap<ProviderName, ProviderAdapter> {
     new WhatsAppProvider(),
     new OpenAIProvider(),
     new SlackProvider(),
+    new SendGridProvider(),
+    new KlaviyoProvider(),
+    new MailchimpProvider(),
   ];
   return new Map(providers.map((provider) => [provider.name, provider]));
 }
@@ -27,7 +33,10 @@ export function defaultProviders(): ReadonlyMap<ProviderName, ProviderAdapter> {
 export {
   AnthropicProvider,
   GitHubProvider,
+  KlaviyoProvider,
+  MailchimpProvider,
   OpenAIProvider,
+  SendGridProvider,
   SlackProvider,
   ShopifyProvider,
   StripeProvider,

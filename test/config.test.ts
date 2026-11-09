@@ -66,12 +66,30 @@ routes:
     provider: slack
     secret_ref: SLACK_SIGNING_SECRET
     destination: https://backend.example/slack
+  - id: sendgrid-main
+    path: /sendgrid
+    provider: sendgrid
+    secret_ref: SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY
+    destination: https://backend.example/sendgrid
+  - id: klaviyo-main
+    path: /klaviyo
+    provider: klaviyo
+    secret_ref: KLAVIYO_WEBHOOK_SECRET
+    destination: https://backend.example/klaviyo
+  - id: mailchimp-main
+    path: /mailchimp
+    provider: mailchimp
+    secret_ref: MAILCHIMP_WEBHOOK_SECRET
+    destination: https://backend.example/mailchimp
 `);
 
   assert.equal(config.routes[0]?.publicUrl, "https://hooks.example.com/twilio");
   assert.equal(config.routes[2]?.verificationSecretRef, "WHATSAPP_VERIFY_TOKEN");
   assert.equal(config.routes[3]?.provider, "openai");
   assert.equal(config.routes[4]?.provider, "slack");
+  assert.equal(config.routes[5]?.provider, "sendgrid");
+  assert.equal(config.routes[6]?.provider, "klaviyo");
+  assert.equal(config.routes[7]?.provider, "mailchimp");
 });
 
 test("parseConfig requires a separate WhatsApp verification token", () => {
