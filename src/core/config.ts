@@ -1,6 +1,13 @@
 import { parse } from "yaml";
 import { ConfigurationError } from "./errors.js";
-import type { ConfirmationConfig, InletConfig, ProviderName, RouteConfig } from "./types.js";
+import type {
+  ConfirmationConfig,
+  DeliveryMode,
+  InletConfig,
+  KafkaConfig,
+  ProviderName,
+  RouteConfig,
+} from "./types.js";
 
 const providers = new Set<ProviderName>([
   "github",
@@ -12,10 +19,23 @@ const providers = new Set<ProviderName>([
   "whatsapp",
   "openai",
   "slack",
+  "sendgrid",
+  "klaviyo",
+  "mailchimp",
   "alchemy",
   "quicknode",
   "helius",
 ]);
+
+const kafkaDefaults: KafkaConfig = {
+  eventsTopic: "inlet.events",
+  resultsTopic: "inlet.results",
+  websocketTopic: "inlet.websocket",
+  reconcile: { afterSeconds: 1_800, searchWindowSeconds: 3_600, maxRedrives: 3 },
+};
+
+// Kafka topic names: letters, digits, '.', '_' and '-', at most 249.
+const topicName = /^[A-Za-z0-9._-]{1,249}$/;
 
 const confirmationDefaults: ConfirmationConfig = {
   delayMs: 4_000,
@@ -56,7 +76,93 @@ export function parseConfig(source: string): InletConfig {
   });
 
   const confirmation = parseConfirmation(raw.confirmation);
-  return { aquiferUrl: aquifer.replace(/\/$/, ""), routes, confirmation };
+  const delivery = parseDelivery(raw.delivery);
+  const config: InletConfig = { aquiferUrl: aquifer.replace(/\/$/, ""), routes, confirmation, delivery };
+  if (delivery === "kafka") {
+    const kafka = parseKafka(raw.kafka);
+    config.kafka = kafka;
+    const deliveryTopics = new Set([kafka.eventsTopic, kafka.resultsTopic]);
+    for (const route of routes) {
+      if (route.eventsTopic !== undefined) deliveryTopics.add(route.eventsTopic);
+      if (route.resultsTopic !== undefined) deliveryTopics.add(route.resultsTopic);
+    }
+    if (deliveryTopics.has(kafka.websocketTopic)) {
+      throw new ConfigurationError("kafka.websocket_topic must differ from every events and results topic");
+    }
+    routes.forEach((route, index) => {
+      if (route.completionUrl !== undefined) {
+        throw new ConfigurationError(
+          `routes[${index}].completion_url can't be used with delivery: kafka; Inlet receives completions itself and writes them to the results topic`,
+        );
+      }
+    });
+  } else if (raw.kafka !== undefined) {
+    throw new ConfigurationError("kafka settings require delivery: kafka");
+  } else {
+    routes.forEach((route, index) => {
+      if (route.eventsTopic !== undefined || route.resultsTopic !== undefined) {
+        throw new ConfigurationError(`routes[${index}] topics require delivery: kafka`);
+      }
+    });
+  }
+  return config;
+}
+
+function parseDelivery(value: unknown): DeliveryMode {
+  if (value === undefined) return "sqs";
+  if (value === "sqs" || value === "kafka") return value;
+  throw new ConfigurationError("delivery must be sqs or kafka");
+}
+
+function parseKafka(value: unknown): KafkaConfig {
+  if (value === undefined) {
+    return { ...kafkaDefaults, reconcile: { ...kafkaDefaults.reconcile } };
+  }
+  if (!isRecord(value)) {
+    throw new ConfigurationError("kafka must be an object");
+  }
+  const reconcile = value.reconcile;
+  if (reconcile !== undefined && !isRecord(reconcile)) {
+    throw new ConfigurationError("kafka.reconcile must be an object");
+  }
+  const r = reconcile ?? {};
+  const defaults = kafkaDefaults.reconcile;
+  const parsed: KafkaConfig = {
+    eventsTopic: optionalTopic(value.events_topic, kafkaDefaults.eventsTopic, "kafka.events_topic"),
+    resultsTopic: optionalTopic(value.results_topic, kafkaDefaults.resultsTopic, "kafka.results_topic"),
+    websocketTopic: optionalTopic(value.websocket_topic, kafkaDefaults.websocketTopic, "kafka.websocket_topic"),
+    reconcile: {
+      afterSeconds: optionalInteger(r.after_seconds, defaults.afterSeconds, "kafka.reconcile.after_seconds", 1),
+      searchWindowSeconds: optionalInteger(
+        r.search_window_seconds,
+        defaults.searchWindowSeconds,
+        "kafka.reconcile.search_window_seconds",
+        1,
+      ),
+      maxRedrives: optionalInteger(r.max_redrives, defaults.maxRedrives, "kafka.reconcile.max_redrives", 0, 100),
+    },
+  };
+  if (parsed.reconcile.searchWindowSeconds < parsed.reconcile.afterSeconds) {
+    // A result can arrive up to after_seconds late and still count.
+    throw new ConfigurationError("kafka.reconcile.search_window_seconds must be at least after_seconds");
+  }
+  return parsed;
+}
+
+function optionalTopic(value: unknown, fallback: string, field: string): string {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string" || !topicName.test(value)) {
+    throw new ConfigurationError(`${field} must be a Kafka topic name (letters, digits, . _ -)`);
+  }
+  return value;
+}
+
+function optionalInteger(value: unknown, fallback: number, field: string, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new ConfigurationError(`${field} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return value as number;
 }
 
 function parseRoute(raw: Record<string, unknown>, index: number): RouteConfig {
@@ -90,6 +196,12 @@ function parseRoute(raw: Record<string, unknown>, index: number): RouteConfig {
     `routes[${index}].verification_secret_ref`,
   );
   assignOptionalString(route, "publicUrl", raw.public_url, `routes[${index}].public_url`);
+  if (raw.events_topic !== undefined) {
+    route.eventsTopic = optionalTopic(raw.events_topic, "", `routes[${index}].events_topic`);
+  }
+  if (raw.results_topic !== undefined) {
+    route.resultsTopic = optionalTopic(raw.results_topic, "", `routes[${index}].results_topic`);
+  }
   assignOptionalInteger(route, "maxRetries", raw.max_retries, `routes[${index}].max_retries`, -1, 100);
   assignOptionalInteger(route, "executeWithinSeconds", raw.execute_within_seconds, `routes[${index}].execute_within_seconds`, 1);
 

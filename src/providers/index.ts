@@ -3,8 +3,11 @@ import { AlchemyProvider } from "./alchemy.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { GitHubProvider } from "./github.js";
 import { HeliusProvider } from "./helius.js";
+import { KlaviyoProvider } from "./klaviyo.js";
+import { MailchimpProvider } from "./mailchimp.js";
 import { OpenAIProvider } from "./openai.js";
 import { QuickNodeProvider } from "./quicknode.js";
+import { SendGridProvider } from "./sendgrid.js";
 import { SlackProvider } from "./slack.js";
 import { ShopifyProvider } from "./shopify.js";
 import { StripeProvider } from "./stripe.js";
@@ -23,6 +26,9 @@ export function defaultProviders(): ReadonlyMap<ProviderName, ProviderAdapter> {
     new WhatsAppProvider(),
     new OpenAIProvider(),
     new SlackProvider(),
+    new SendGridProvider(),
+    new KlaviyoProvider(),
+    new MailchimpProvider(),
     new AlchemyProvider(),
     new QuickNodeProvider(),
     new HeliusProvider(),
@@ -35,8 +41,11 @@ export {
   AnthropicProvider,
   GitHubProvider,
   HeliusProvider,
+  KlaviyoProvider,
+  MailchimpProvider,
   OpenAIProvider,
   QuickNodeProvider,
+  SendGridProvider,
   SlackProvider,
   ShopifyProvider,
   StripeProvider,

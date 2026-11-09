@@ -8,6 +8,9 @@ export type ProviderName =
   | "whatsapp"
   | "openai"
   | "slack"
+  | "sendgrid"
+  | "klaviyo"
+  | "mailchimp"
   | "alchemy"
   | "quicknode"
   | "helius";
@@ -63,6 +66,8 @@ export interface RouteConfig {
   completionUrl?: string;
   maxRetries?: number;
   executeWithinSeconds?: number;
+  eventsTopic?: string;
+  resultsTopic?: string;
 }
 
 export interface ConfirmationConfig {
@@ -72,10 +77,33 @@ export interface ConfirmationConfig {
   maxBackoffMs: number;
 }
 
+export type DeliveryMode = "sqs" | "kafka";
+
+export interface KafkaReconcileConfig {
+  /** An event with no terminal result this long after it was written is overdue. */
+  afterSeconds: number;
+  /** How far past an event's write time to look for its result. */
+  searchWindowSeconds: number;
+  /** Redrives before the reconciler records gave_up. */
+  maxRedrives: number;
+}
+
+export interface KafkaConfig {
+  eventsTopic: string;
+  resultsTopic: string;
+  /** Where Aquifer's exported WebSocket transcripts are written. */
+  websocketTopic: string;
+  reconcile: KafkaReconcileConfig;
+}
+
 export interface InletConfig {
   aquiferUrl: string;
   routes: RouteConfig[];
   confirmation: ConfirmationConfig;
+  /** sqs (default) keeps today's SQS FIFO or Durable Object delivery. */
+  delivery?: DeliveryMode;
+  /** Present only when delivery is kafka. */
+  kafka?: KafkaConfig;
 }
 
 export interface DeliveryEnvelope {
@@ -92,6 +120,8 @@ export interface DeliveryEnvelope {
   receivedAt: number;
   headers: HeadersRecord;
   bodyBase64: string;
+  /** Overrides the default inlet:<provider>:<route>:<event> Aquifer key. */
+  idempotencyKey?: string;
 }
 
 export interface SecretResolver {
