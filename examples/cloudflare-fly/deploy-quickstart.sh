@@ -110,14 +110,16 @@ save_state() {
     }' > "$STATE_FILE"
 }
 
+# EXIT, not ERR: an explicit `exit 1` doesn't fire ERR.
 show_cleanup_on_error() {
   local status=$?
+  [ "$status" -eq 0 ] && return
   save_state
   printf '\nDeployment stopped. Remove only this run with:\n' >&2
   printf '  %q %q\n' "$ROOT_DIR/examples/cloudflare-fly/destroy-quickstart.sh" "$STATE_FILE" >&2
   exit "$status"
 }
-trap show_cleanup_on_error ERR
+trap show_cleanup_on_error EXIT
 save_state
 
 if [ -n "${AQUIFER_DIR:-}" ]; then
@@ -266,7 +268,7 @@ ACCOUNT_SUBDOMAIN=$(jq -er '.result.subdomain' <<<"$ACCOUNT_SUBDOMAIN_RESPONSE")
 WORKER_URL="https://$WORKER_NAME.$ACCOUNT_SUBDOMAIN.workers.dev"
 save_state
 
-trap - ERR
+trap - EXIT
 printf '\nCloudflare-to-Fly quick start is ready.\n'
 printf 'Worker: %s\n' "${WORKER_URL:-$WORKER_NAME}"
 printf 'Aquifer: http://%s.flycast (private)\n' "$AQUIFER_APP"

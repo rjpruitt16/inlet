@@ -20,7 +20,7 @@ Use one Worker deployment per provider so each provider keeps its signing secret
 ## Prerequisites
 
 - `flyctl`, authenticated to the Fly organization that will host both apps
-- Node.js 20 or later, npm, Git, `curl`, `jq`, and OpenSSL
+- Node.js 22.12 or later (the script runs the latest Wrangler, which needs it), npm, Git, `curl`, `jq`, and OpenSSL
 - Wrangler authentication
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_API_TOKEN` with Workers write, Cloudflare Tunnel write, and Connectivity Directory admin access
@@ -47,11 +47,13 @@ The script refuses to reuse existing Fly app names. It writes a non-secret state
 
 The combined quick start defaults to `AQUIFER_VERSION=source` because the current `v0.14.0` release predates callback-free jobs. Set an explicit release version after publishing one that contains Aquifer commit `893971c` or later.
 
-Configure GitHub to send webhooks to the printed Worker URL plus `/webhooks/github/main` using the same secret. The Worker verifies the signature, durably orders the event, and submits it through the private `INLET_AQUIFER` binding.
+Configure GitHub to send webhooks to the printed Worker URL plus `/webhooks/github/main` using the same secret, with content type `application/json` (Inlet rejects form-encoded deliveries). The Worker verifies the signature, durably orders the event, and submits it through the private `INLET_AQUIFER` binding.
 
 The quick start omits a Cloudflare dead-letter queue to keep evaluation cleanup small. Add `INLET_DLQ` before production use.
 
 ## Remove
+
+Cleanup deletes the Worker with its Durable Object storage and the Aquifer app with its volume, including events already acknowledged to GitHub but not yet delivered. Disable the GitHub webhook and let the backlog drain first.
 
 Use the exact cleanup command printed by the deploy script:
 
