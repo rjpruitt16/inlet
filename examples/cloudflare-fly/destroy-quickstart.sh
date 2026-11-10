@@ -54,8 +54,12 @@ run_cleanup() {
     return
   fi
   local updated
-  updated=$(jq --arg key "$owned_key" '.[$key] = false' "$STATE_FILE") && \
-    printf '%s\n' "$updated" > "$STATE_FILE"
+  if ! updated=$(jq --arg key "$owned_key" '.[$key] = false' "$STATE_FILE") || \
+    ! printf '%s\n' "$updated" > "$STATE_FILE.tmp" || \
+    ! mv "$STATE_FILE.tmp" "$STATE_FILE"; then
+    echo "could not record $owned_key=false in $STATE_FILE" >&2
+    FAILED=1
+  fi
 }
 
 # Destroys a Fly app only when this token can see it. An app it can't see

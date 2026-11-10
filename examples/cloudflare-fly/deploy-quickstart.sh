@@ -61,10 +61,6 @@ if flyctl status --app "$CONNECTOR_APP" >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -e "$STATE_FILE" ]; then
-  echo "refusing to overwrite existing state: $STATE_FILE" >&2
-  exit 1
-fi
 WORKER_CHECK_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME" \
   --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN") || WORKER_CHECK_STATUS=000
@@ -80,7 +76,13 @@ case "$WORKER_CHECK_STATUS" in
     ;;
 esac
 
-mkdir -p "$STATE_DIR"
+# mkdir without -p claims the directory atomically, so two runs with the same
+# prefix can't share state.
+mkdir -p "$(dirname -- "$STATE_DIR")"
+if ! mkdir "$STATE_DIR" 2>/dev/null; then
+  echo "refusing to reuse existing state directory: $STATE_DIR" >&2
+  exit 1
+fi
 
 TUNNEL_ID=""
 VPC_SERVICE_ID=""
