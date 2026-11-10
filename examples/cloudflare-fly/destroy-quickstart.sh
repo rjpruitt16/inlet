@@ -50,8 +50,9 @@ run_cleanup() {
   fi
 }
 
-# Destroys a Fly app if it exists. A failed lookup is a failure, not a
-# missing app, so the state file is kept for another try.
+# Destroys a Fly app if it exists. A lookup that can't confirm the app is
+# gone is a failure, not a missing app, so the state file is kept for
+# another try.
 destroy_fly_app() {
   local apps
   if ! apps=$(flyctl apps list --json 2>/dev/null); then
@@ -61,6 +62,16 @@ destroy_fly_app() {
   fi
   if jq -e --arg app "$1" 'any(.[]; (.Name // .name // .ID) == $app)' <<<"$apps" >/dev/null; then
     run_cleanup flyctl apps destroy "$1" --yes
+    return
+  fi
+  # Not listed may only mean this token can't see it: count it gone only if
+  # Fly says it doesn't exist.
+  local status_output
+  if status_output=$(flyctl status --app "$1" 2>&1); then
+    run_cleanup flyctl apps destroy "$1" --yes
+  elif ! grep -q 'Could not find App' <<<"$status_output"; then
+    echo "could not confirm whether Fly app $1 still exists" >&2
+    FAILED=1
   fi
 }
 
