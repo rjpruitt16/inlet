@@ -65,20 +65,45 @@ function eventType(network: string | undefined, dataset: string | undefined): st
   return dataset ?? network ?? "stream.delivery";
 }
 
+// Inflation runs before the signature check, so an unsigned gzip bomb must not
+// be able to grow without bound.
+export const maxInflatedBytes = 10 * 1024 * 1024;
+
 async function decodedPayload(request: WebhookRequest): Promise<Uint8Array> {
   if (!isGzipEncoded(request)) return request.body;
 
   // Some HTTP frameworks retain the gzip header after inflating the body.
   if (!hasGzipHeader(request.body)) return request.body;
 
+  const reader = new Blob([Uint8Array.from(request.body)])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"))
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
-    const stream = new Blob([Uint8Array.from(request.body)])
-      .stream()
-      .pipeThrough(new DecompressionStream("gzip"));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
-  } catch {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxInflatedBytes) {
+        await reader.cancel();
+        throw new PayloadError(`QuickNode webhook body inflates past ${maxInflatedBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof PayloadError) throw error;
     throw new PayloadError("QuickNode webhook body is not valid gzip");
   }
+
+  const payload = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    payload.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return payload;
 }
 
 function isGzipEncoded(request: WebhookRequest): boolean {

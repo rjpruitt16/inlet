@@ -9,6 +9,7 @@ import {
   sha256HexBytes,
   utf8,
 } from "../src/core/encoding.js";
+import { PayloadError } from "../src/core/errors.js";
 import type { WebhookRequest } from "../src/core/types.js";
 import { AlchemyProvider } from "../src/providers/alchemy.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
@@ -18,7 +19,7 @@ import { defaultProviders } from "../src/providers/index.js";
 import { KlaviyoProvider } from "../src/providers/klaviyo.js";
 import { MailchimpProvider } from "../src/providers/mailchimp.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
-import { QuickNodeProvider } from "../src/providers/quicknode.js";
+import { maxInflatedBytes, QuickNodeProvider } from "../src/providers/quicknode.js";
 import { SendGridProvider } from "../src/providers/sendgrid.js";
 import { SlackProvider } from "../src/providers/slack.js";
 import { ShopifyProvider } from "../src/providers/shopify.js";
@@ -622,6 +623,20 @@ test("QuickNode does not forward a stale gzip header after runtime inflation", a
   );
 
   assert.equal(result.forwardedHeaders["content-encoding"], undefined);
+});
+
+test("QuickNode rejects a gzip body that inflates past the limit before verifying it", async () => {
+  const request = webhookRequest(Uint8Array.from(gzipSync(Buffer.alloc(maxInflatedBytes + 1))), {
+    "content-encoding": "gzip",
+    "x-qn-nonce": "nonce-bomb",
+    "x-qn-signature": "00",
+    "x-qn-timestamp": "1800000002",
+  });
+
+  await assert.rejects(
+    () => new QuickNodeProvider().verify(request, "quicknode-secret"),
+    (error: unknown) => error instanceof PayloadError && /inflates past/.test(error.message),
+  );
 });
 
 test("Helius verifies its authorization value and groups enhanced events by fee payer", async () => {
