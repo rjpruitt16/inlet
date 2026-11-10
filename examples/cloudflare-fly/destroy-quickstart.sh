@@ -44,52 +44,53 @@ TUNNEL_OWNED=$(jq -r '.tunnel_owned // false' "$STATE_FILE")
 VPC_SERVICE_OWNED=$(jq -r '.vpc_service_owned // false' "$STATE_FILE")
 FAILED=0
 
+# Runs one cleanup step. On success it marks the resource no longer owned in
+# the state file, so a rerun after a partial cleanup skips what's gone.
 run_cleanup() {
+  local owned_key=$1
+  shift
   if ! "$@"; then
     FAILED=1
+    return
   fi
+  local updated
+  updated=$(jq --arg key "$owned_key" '.[$key] = false' "$STATE_FILE") && \
+    printf '%s\n' "$updated" > "$STATE_FILE"
 }
 
-# Destroys a Fly app if it exists. A lookup that can't confirm the app is
-# gone is a failure, not a missing app, so the state file is kept for
-# another try.
+# Destroys a Fly app only when this token can see it. An app it can't see
+# may still exist (a token without access gets the same "Could not find
+# App" as a deleted app), so the state file is kept for a manual check.
 destroy_fly_app() {
-  local apps
+  local owned_key=$1 app=$2 apps
   if ! apps=$(flyctl apps list --json 2>/dev/null); then
-    echo "could not list Fly apps to check $1" >&2
+    echo "could not list Fly apps to check $app" >&2
     FAILED=1
     return
   fi
-  if jq -e --arg app "$1" 'any(.[]; (.Name // .name // .ID) == $app)' <<<"$apps" >/dev/null; then
-    run_cleanup flyctl apps destroy "$1" --yes
+  if jq -e --arg app "$app" 'any(.[]; (.Name // .name // .ID) == $app)' <<<"$apps" >/dev/null; then
+    run_cleanup "$owned_key" flyctl apps destroy "$app" --yes
     return
   fi
-  # Not listed may only mean this token can't see it: count it gone only if
-  # Fly says it doesn't exist.
-  local status_output
-  if status_output=$(flyctl status --app "$1" 2>&1); then
-    run_cleanup flyctl apps destroy "$1" --yes
-  elif ! grep -q 'Could not find App' <<<"$status_output"; then
-    echo "could not confirm whether Fly app $1 still exists" >&2
-    FAILED=1
-  fi
+  echo "Fly app $app is not visible to this token. If it is already deleted, set $owned_key to false in the state file and rerun." >&2
+  FAILED=1
 }
 
 if [ "$WORKER_OWNED" = "true" ] && [ -n "$WORKER_NAME" ]; then
-  run_cleanup npx --yes wrangler@latest delete "$WORKER_NAME" --force
+  run_cleanup worker_owned npx --yes wrangler@latest delete "$WORKER_NAME" --force
 fi
 if [ "$VPC_SERVICE_OWNED" = "true" ] && [ -n "$VPC_SERVICE_ID" ]; then
-  run_cleanup npx --yes wrangler@latest vpc service delete "$VPC_SERVICE_ID"
+  run_cleanup vpc_service_owned npx --yes wrangler@latest vpc service delete "$VPC_SERVICE_ID"
 fi
 if [ "$CONNECTOR_OWNED" = "true" ] && [ -n "$CONNECTOR_APP" ]; then
-  destroy_fly_app "$CONNECTOR_APP"
+  destroy_fly_app connector_owned "$CONNECTOR_APP"
 fi
 if [ "$TUNNEL_OWNED" = "true" ] && [ -n "$TUNNEL_ID" ]; then
   if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
     echo "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required to delete the tunnel" >&2
     FAILED=1
   else
-    run_cleanup curl --fail-with-body --silent --show-error \
+    run_cleanup tunnel_owned curl --fail-with-body --silent --show-error \
       "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID?cascade=true" \
       --request DELETE \
       --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -97,7 +98,7 @@ if [ "$TUNNEL_OWNED" = "true" ] && [ -n "$TUNNEL_ID" ]; then
   fi
 fi
 if [ "$AQUIFER_OWNED" = "true" ] && [ -n "$AQUIFER_APP" ]; then
-  destroy_fly_app "$AQUIFER_APP"
+  destroy_fly_app aquifer_owned "$AQUIFER_APP"
 fi
 
 if [ "$FAILED" -eq 0 ]; then

@@ -61,6 +61,25 @@ if flyctl status --app "$CONNECTOR_APP" >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ -e "$STATE_FILE" ]; then
+  echo "refusing to overwrite existing state: $STATE_FILE" >&2
+  exit 1
+fi
+WORKER_CHECK_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME" \
+  --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN") || WORKER_CHECK_STATUS=000
+case "$WORKER_CHECK_STATUS" in
+  404) ;;
+  200)
+    echo "refusing to manage existing Worker: $WORKER_NAME" >&2
+    exit 1
+    ;;
+  *)
+    echo "could not check whether Worker $WORKER_NAME exists (HTTP $WORKER_CHECK_STATUS)" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "$STATE_DIR"
 
 TUNNEL_ID=""
