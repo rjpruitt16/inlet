@@ -146,8 +146,8 @@ TUNNEL_RESPONSE=$(curl --fail-with-body --silent --show-error \
   --request POST \
   --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   --header "Content-Type: application/json" \
-  --data "$(jq -n --arg name "$TUNNEL_NAME" --arg secret "$TUNNEL_SECRET" \
-    '{name: $name, config_src: "cloudflare", tunnel_secret: $secret}')")
+  --data @- < <(jq -n --arg name "$TUNNEL_NAME" --arg secret "$TUNNEL_SECRET" \
+    '{name: $name, config_src: "cloudflare", tunnel_secret: $secret}'))
 TUNNEL_ID=$(jq -er '.result.id' <<<"$TUNNEL_RESPONSE")
 TUNNEL_OWNED=true
 save_state
@@ -185,10 +185,11 @@ flyctl deploy \
   --yes
 
 for _ in $(seq 1 30); do
+  # A failed poll counts as not healthy yet.
   TUNNEL_STATUS_RESPONSE=$(curl --fail-with-body --silent --show-error \
     "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID" \
     --request GET \
-    --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+    --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN") || TUNNEL_STATUS_RESPONSE='{}'
   if [ "$(jq -r '.result.status' <<<"$TUNNEL_STATUS_RESPONSE")" = "healthy" ]; then
     break
   fi

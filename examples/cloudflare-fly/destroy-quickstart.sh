@@ -17,16 +17,16 @@ if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
 fi
 STATE_FILE=$(cd -- "$(dirname -- "$STATE_FILE")" && pwd)/$(basename -- "$STATE_FILE")
 STATE_DIR=$(dirname -- "$STATE_FILE")
-case "$STATE_DIR/" in
-  "$ROOT_DIR/.inlet-quickstart/"*) ;;
-  *)
-    echo "state file must be inside $ROOT_DIR/.inlet-quickstart" >&2
-    exit 1
-    ;;
-esac
 if ! jq -e '.resource_prefix and .aquifer_app and .connector_app and .worker_name' \
   "$STATE_FILE" >/dev/null; then
   echo "invalid quick-start state file" >&2
+  exit 1
+fi
+# Cleanup removes STATE_DIR, so it must be this run's own directory.
+RESOURCE_PREFIX=$(jq -r '.resource_prefix' "$STATE_FILE")
+if [ "$STATE_DIR" != "$ROOT_DIR/.inlet-quickstart/$RESOURCE_PREFIX" ] || \
+  [ "$(basename -- "$STATE_FILE")" != "state.json" ]; then
+  echo "state file must be $ROOT_DIR/.inlet-quickstart/$RESOURCE_PREFIX/state.json" >&2
   exit 1
 fi
 
@@ -50,15 +50,28 @@ run_cleanup() {
   fi
 }
 
+# Destroys a Fly app if it exists. A failed lookup is a failure, not a
+# missing app, so the state file is kept for another try.
+destroy_fly_app() {
+  local apps
+  if ! apps=$(flyctl apps list --json 2>/dev/null); then
+    echo "could not list Fly apps to check $1" >&2
+    FAILED=1
+    return
+  fi
+  if jq -e --arg app "$1" 'any(.[]; (.Name // .name // .ID) == $app)' <<<"$apps" >/dev/null; then
+    run_cleanup flyctl apps destroy "$1" --yes
+  fi
+}
+
 if [ "$WORKER_OWNED" = "true" ] && [ -n "$WORKER_NAME" ]; then
   run_cleanup npx --yes wrangler@latest delete "$WORKER_NAME" --force
 fi
 if [ "$VPC_SERVICE_OWNED" = "true" ] && [ -n "$VPC_SERVICE_ID" ]; then
   run_cleanup npx --yes wrangler@latest vpc service delete "$VPC_SERVICE_ID"
 fi
-if [ "$CONNECTOR_OWNED" = "true" ] && [ -n "$CONNECTOR_APP" ] && \
-  flyctl status --app "$CONNECTOR_APP" >/dev/null 2>&1; then
-  run_cleanup flyctl apps destroy "$CONNECTOR_APP" --yes
+if [ "$CONNECTOR_OWNED" = "true" ] && [ -n "$CONNECTOR_APP" ]; then
+  destroy_fly_app "$CONNECTOR_APP"
 fi
 if [ "$TUNNEL_OWNED" = "true" ] && [ -n "$TUNNEL_ID" ]; then
   if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
@@ -72,9 +85,8 @@ if [ "$TUNNEL_OWNED" = "true" ] && [ -n "$TUNNEL_ID" ]; then
       --output /dev/null
   fi
 fi
-if [ "$AQUIFER_OWNED" = "true" ] && [ -n "$AQUIFER_APP" ] && \
-  flyctl status --app "$AQUIFER_APP" >/dev/null 2>&1; then
-  run_cleanup flyctl apps destroy "$AQUIFER_APP" --yes
+if [ "$AQUIFER_OWNED" = "true" ] && [ -n "$AQUIFER_APP" ]; then
+  destroy_fly_app "$AQUIFER_APP"
 fi
 
 if [ "$FAILED" -eq 0 ]; then
