@@ -4,4 +4,5 @@ dist/
 *.log
 .wrangler/
 .aws-sam/
+.inlet-quickstart/
 .inlet/

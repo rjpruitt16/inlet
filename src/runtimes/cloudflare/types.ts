@@ -28,9 +28,14 @@ export interface CloudflareQueueLike<T = unknown> {
   send(body: T): Promise<void>;
 }
 
+export interface CloudflareFetcherLike {
+  fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
+}
+
 export interface CloudflareEnv {
   INLET_CONFIG: string;
   INLET_ORDERING: DurableObjectNamespaceLike;
+  INLET_AQUIFER?: CloudflareFetcherLike;
   INLET_AQUIFER_TIMEOUT_MS?: string;
   INLET_DLQ?: CloudflareQueueLike;
   [binding: string]: unknown;
