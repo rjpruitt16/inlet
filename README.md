@@ -20,6 +20,9 @@ Inlet is Apache-2.0 licensed.
 | Twilio | HMAC-SHA1 signature over the public URL and request parameters | account SID -> messaging-service SID -> service SID |
 | Telegram | Webhook secret-token header | chat ID -> sender ID -> user ID |
 | WhatsApp Cloud API | Meta HMAC-SHA256 signature | message sender -> status recipient -> contact ID -> phone-number ID -> WhatsApp Business Account ID |
+| Alchemy | HMAC-SHA256 signature over the raw body | webhook ID -> app ID -> network |
+| QuickNode | HMAC-SHA256 over nonce, timestamp, and decoded payload | stream ID -> webhook ID |
+| Helius | Constant-time comparison of the configured `Authorization` value | first transaction fee payer -> first transfer/account identity |
 
 If none of a provider's keys is present, Inlet uses `route:<route-id>`. Any route can replace these defaults with an explicit `fairness_key`.
 
@@ -40,6 +43,7 @@ flowchart LR
     SL[Slack] --> SLI[Slack Inlet<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     EM[SendGrid, Klaviyo, Mailchimp] --> EMI[Email platform Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
     CO[Communications providers<br/>Twilio, Telegram, WhatsApp] --> COI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
+    BC[Blockchain providers<br/>Alchemy, QuickNode, Helius] --> BCI[Provider Inlets<br/>Lambda or Worker<br/>ordered queue<br/>delivery worker]
 
     GHI --> CA[Canalis<br/>optional fleet coordinator]
     SHI --> CA
@@ -48,6 +52,7 @@ flowchart LR
     SLI --> CA
     EMI --> CA
     COI --> CA
+    BCI --> CA
     CA --> AQ[Aquifer regional fleet]
     AQ --> BE[Your paced backends]
 ```
@@ -160,6 +165,8 @@ SendGrid uses the Event Webhook verification public key from Mail Settings in `s
 Klaviyo support is for signed system webhooks, not unsigned flow webhook actions. Use the webhook signing secret as `secret_ref`. Inlet verifies the HMAC, requires the header and payload webhook IDs to match, and uses a common profile ID when a batch belongs to one profile. Mixed-profile batches use the Klaviyo account ID. Klaviyo restricts its Webhooks API to eligible plans and app partners.
 
 Mailchimp support is for Marketing audience webhooks, not Mailchimp Transactional/Mandrill. Enable webhook signing when creating the webhook and store its one-time signing secret in `secret_ref`. Inlet verifies the timestamped signature against the untouched form body and rejects deliveries outside the five-minute replay window.
+
+Alchemy uses the webhook signing key in `secret_ref`. QuickNode uses the Stream or Webhook security token and supports both plain JSON and gzip deliveries. Helius uses its official `authHeader` mechanism: configure the same random value in Helius and `secret_ref`; Helius sends that exact value in `Authorization`. Helius does not sign the request body, so use a unique, high-entropy value and HTTPS.
 
 `webhook_url` is not sent to Aquifer unless a route configures `completion_url`. Inlet only needs Aquifer to own the provider event. Aquifer retains the terminal result for polling.
 

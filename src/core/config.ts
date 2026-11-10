@@ -22,6 +22,9 @@ const providers = new Set<ProviderName>([
   "sendgrid",
   "klaviyo",
   "mailchimp",
+  "alchemy",
+  "quicknode",
+  "helius",
 ]);
 
 const kafkaDefaults: KafkaConfig = {

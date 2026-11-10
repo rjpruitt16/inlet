@@ -10,7 +10,10 @@ export type ProviderName =
   | "slack"
   | "sendgrid"
   | "klaviyo"
-  | "mailchimp";
+  | "mailchimp"
+  | "alchemy"
+  | "quicknode"
+  | "helius";
 
 export type HeadersRecord = Record<string, string>;
 
